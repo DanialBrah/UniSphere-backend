@@ -19,7 +19,7 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
-          MYSQL_DATABASE: unisphere_db
+          MYSQL_DATABASE: unisphere
         ports:
           - 3306:3306
         options: >-
@@ -44,7 +44,7 @@ jobs:
       - name: Run tests
         run: ./mvnw test
         env:
-          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/unisphere_db
+          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/unisphere
           SPRING_DATASOURCE_USERNAME: root
           SPRING_DATASOURCE_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
 

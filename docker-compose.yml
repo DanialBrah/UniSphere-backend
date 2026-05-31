@@ -1,0 +1,52 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: unisphere-mysql
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: yes
+      MYSQL_DATABASE: unisphere
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - unisphere-network
+
+  backend:
+    image: danialx003/unisphere-backend:latest
+    container_name: unisphere-backend
+    ports:
+      - '8081:8081'
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/unisphere
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD:
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - unisphere-network
+
+  frontend:
+    image: danialx003/unisphere-frontend:latest
+    container_name: unisphere-frontend
+    ports:
+      - '5173:80'
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - unisphere-network
+
+volumes:
+  mysql_data:
+
+networks:
+  unisphere-network:
+    driver: bridge
