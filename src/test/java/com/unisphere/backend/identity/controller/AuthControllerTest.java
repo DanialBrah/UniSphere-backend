@@ -1,12 +1,11 @@
 package com.unisphere.backend.identity.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.unisphere.backend.AbstractIntegrationTest;
 import com.unisphere.backend.identity.dto.LoginRequest;
 import com.unisphere.backend.identity.dto.RegisterStudentRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -16,10 +15,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest
-@AutoConfigureMockMvc
-@Transactional  // rolls back after each test — keeps DB clean between runs
-class AuthControllerTest {
+@Transactional  // rolls back after each test — keeps container DB clean between runs
+class AuthControllerTest extends AbstractIntegrationTest {
 
     @Autowired MockMvc mockMvc;
     @Autowired ObjectMapper objectMapper;

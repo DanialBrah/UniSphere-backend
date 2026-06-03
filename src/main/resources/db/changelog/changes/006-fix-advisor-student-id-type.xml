@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+        Fix clubs.advisor_student_id type: BIGINT → BIGINT UNSIGNED.
+        Every user/identity PK in this schema is BIGINT UNSIGNED.
+        A signed column cannot carry a FK to users(id) — MySQL rejects
+        FK constraints between signed and unsigned integer columns.
+    -->
+    <changeSet id="006-fix-advisor-student-id-type" author="unisphere">
+        <modifyDataType
+                tableName="clubs"
+                columnName="advisor_student_id"
+                newDataType="BIGINT UNSIGNED"/>
+    </changeSet>
+
+</databaseChangeLog>

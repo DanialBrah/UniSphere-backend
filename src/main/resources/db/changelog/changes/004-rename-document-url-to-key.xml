@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+        Rename document_url → document_key in verification_documents.
+
+        Presigned URLs expire (MinIO default: hours to days). Persisting them
+        leaves verification records with dead links and breaks admin re-review.
+        Store only the stable MinIO object key (e.g. verification-docs/42/matric.pdf)
+        and mint a presigned URL at read time, never at write time.
+    -->
+    <changeSet id="004-rename-document-url-to-key" author="unisphere">
+        <renameColumn
+                tableName="verification_documents"
+                oldColumnName="document_url"
+                newColumnName="document_key"
+                columnDataType="VARCHAR(500)"/>
+    </changeSet>
+
+</databaseChangeLog>

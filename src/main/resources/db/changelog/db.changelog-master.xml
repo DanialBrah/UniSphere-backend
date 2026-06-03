@@ -5,8 +5,11 @@
         xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
             http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
 
-    <include file="changes/001-create-users-table.xml"    relativeToChangelogFile="true"/>
-    <include file="changes/002-create-role-tables.xml"    relativeToChangelogFile="true"/>
-    <include file="changes/003-identity-extras.xml"       relativeToChangelogFile="true"/>
+    <include file="changes/001-create-users-table.xml"           relativeToChangelogFile="true"/>
+    <include file="changes/002-create-role-tables.xml"           relativeToChangelogFile="true"/>
+    <include file="changes/003-identity-extras.xml"              relativeToChangelogFile="true"/>
+    <include file="changes/004-rename-document-url-to-key.xml"        relativeToChangelogFile="true"/>
+    <include file="changes/005-add-university-id-foreign-keys.xml"       relativeToChangelogFile="true"/>
+    <include file="changes/006-fix-advisor-student-id-type.xml"          relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

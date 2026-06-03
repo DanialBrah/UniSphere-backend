@@ -1,7 +1,9 @@
 package com.unisphere.backend.config;
 
-import com.unisphere.backend.common.exception.UserNotFoundException;
 import com.unisphere.backend.identity.repository.UserRepository;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+
+import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,8 +23,8 @@ public class ApplicationConfig {
 
     @Bean
     public UserDetailsService userDetailsService() {
-        return email -> userRepository.findByEmail(email)
-                .orElseThrow(() -> new UserNotFoundException("User not found: " + email));
+        return email -> userRepository.findByEmail(email.toLowerCase(Locale.ROOT).strip())
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }
 
     @Bean

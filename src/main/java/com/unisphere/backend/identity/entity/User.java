@@ -91,8 +91,12 @@ public abstract class User implements UserDetails {
     @Override
     public boolean isCredentialsNonExpired() { return true; }
 
+    /**
+     * Only ACTIVE non-deleted accounts are enabled.
+     * PENDING, SUSPENDED, BANNED, and soft-deleted are all blocked.
+     */
     @Override
     public boolean isEnabled() {
-        return deletedAt == null && status != UserStatus.BANNED;
+        return deletedAt == null && status == UserStatus.ACTIVE;
     }
 }

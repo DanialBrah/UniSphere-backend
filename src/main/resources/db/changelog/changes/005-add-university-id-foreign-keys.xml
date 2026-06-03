@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+        Add FK constraints for university_id columns in students, alumni, clubs.
+
+        In JOINED inheritance the university's PK is universities.user_id = users.id,
+        so we reference users(id). ON DELETE SET NULL means removing a university
+        account nulls the affiliation rather than blocking the delete or orphaning rows.
+    -->
+
+    <changeSet id="005-fk-students-university" author="unisphere">
+        <addForeignKeyConstraint
+                constraintName="fk_students_university_id"
+                baseTableName="students"    baseColumnNames="university_id"
+                referencedTableName="users" referencedColumnNames="id"
+                onDelete="SET NULL"/>
+    </changeSet>
+
+    <changeSet id="005-fk-alumni-university" author="unisphere">
+        <addForeignKeyConstraint
+                constraintName="fk_alumni_university_id"
+                baseTableName="alumni"      baseColumnNames="university_id"
+                referencedTableName="users" referencedColumnNames="id"
+                onDelete="SET NULL"/>
+    </changeSet>
+
+    <changeSet id="005-fk-clubs-university" author="unisphere">
+        <addForeignKeyConstraint
+                constraintName="fk_clubs_university_id"
+                baseTableName="clubs"       baseColumnNames="university_id"
+                referencedTableName="users" referencedColumnNames="id"
+                onDelete="SET NULL"/>
+    </changeSet>
+
+</databaseChangeLog>

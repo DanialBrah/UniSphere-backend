@@ -2,6 +2,7 @@ package com.unisphere.backend.identity.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record RegisterAlumniRequest(
@@ -23,7 +24,7 @@ public record RegisterAlumniRequest(
         String phone,
 
         /** Four-digit year string e.g. "2020" */
-        @Size(max = 4)
+        @Pattern(regexp = "^[0-9]{4}$", message = "Graduation year must be a 4-digit year (e.g. 2020)")
         String graduationYear,
 
         @Size(max = 100)

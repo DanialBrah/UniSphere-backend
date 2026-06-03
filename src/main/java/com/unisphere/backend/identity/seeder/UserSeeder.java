@@ -5,6 +5,7 @@ import com.unisphere.backend.identity.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "app.seeding.enabled", havingValue = "true", matchIfMissing = false)
 public class UserSeeder implements CommandLineRunner {
 
     private final UserRepository       userRepository;
@@ -54,6 +56,7 @@ public class UserSeeder implements CommandLineRunner {
         s.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
         s.setPhone("+60123456701");
         s.setStatus(UserStatus.ACTIVE);
+        s.setVerified(true);
         s.setFullName("Ahmad Faiz bin Abdullah");
         s.setMatricNumber("2021001234");
         s.setUniversityEmail("ahmadfahiz@student.uitm.edu.my");
@@ -75,6 +78,7 @@ public class UserSeeder implements CommandLineRunner {
         a.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
         a.setPhone("+60123456702");
         a.setStatus(UserStatus.ACTIVE);
+        a.setVerified(true);
         a.setFullName("Siti Rahimah binti Yusof");
         a.setGraduationYear("2022");
         a.setDegree("Bachelor of Information Technology (Hons.)");
@@ -97,6 +101,7 @@ public class UserSeeder implements CommandLineRunner {
         e.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
         e.setPhone("+60387654321");
         e.setStatus(UserStatus.ACTIVE);
+        e.setVerified(true);
         e.setCompanyName("TechCorp Sdn Bhd");
         e.setIndustry("Technology");
         e.setCompanySize("51-200");
@@ -116,6 +121,7 @@ public class UserSeeder implements CommandLineRunner {
         u.setEmail(email);
         u.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
         u.setStatus(UserStatus.ACTIVE);
+        u.setVerified(true);
         u.setName("Universiti Teknologi MARA");
         u.setShortName("UiTM");
         u.setWebsiteUrl("https://www.uitm.edu.my");
@@ -136,9 +142,12 @@ public class UserSeeder implements CommandLineRunner {
         c.setEmail(email);
         c.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
         c.setStatus(UserStatus.ACTIVE);
+        c.setVerified(true);
         c.setName("Google Developer Student Club UiTM");
         c.setCategory("Technology");
         c.setDescription("A student-led community that connects developers at UiTM.");
+        // universityId left null in seeder — university seed runs first but its ID
+        // is only known after the DB assigns it; link via admin flow in production
         clubRepository.save(c);
         log.info("Seeded CLUB       → {}", email);
     }
@@ -153,6 +162,7 @@ public class UserSeeder implements CommandLineRunner {
         a.setEmail(email);
         a.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
         a.setStatus(UserStatus.ACTIVE);
+        a.setVerified(true);
         a.setFullName("Super Admin");
         a.setAdminLevel(AdminSubRole.SUPER);
         adminRepository.save(a);

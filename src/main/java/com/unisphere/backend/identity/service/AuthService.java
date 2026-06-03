@@ -7,15 +7,18 @@ import com.unisphere.backend.common.exception.UserNotFoundException;
 import com.unisphere.backend.config.JwtConfig;
 import com.unisphere.backend.identity.dto.*;
 import com.unisphere.backend.identity.entity.*;
+import com.unisphere.backend.identity.entity.UserStatus;
 import com.unisphere.backend.identity.mapper.UserMapper;
 import com.unisphere.backend.identity.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Locale;
 
 @Service
 @Transactional
@@ -37,10 +40,12 @@ public class AuthService {
     // ── Register ────────────────────────────────────────────────────────────
 
     public AuthResponse registerStudent(RegisterStudentRequest req) {
-        assertEmailAvailable(req.email());
+        String email = normalizeEmail(req.email());
+        assertEmailAvailable(email);
         Student s = new Student();
-        s.setEmail(req.email());
+        s.setEmail(email);
         s.setPassword(passwordEncoder.encode(req.password()));
+        s.setStatus(UserStatus.ACTIVE);
         s.setPhone(req.phone());
         s.setFullName(req.fullName());
         s.setMatricNumber(req.matricNumber());
@@ -56,10 +61,12 @@ public class AuthService {
     }
 
     public AuthResponse registerAlumni(RegisterAlumniRequest req) {
-        assertEmailAvailable(req.email());
+        String email = normalizeEmail(req.email());
+        assertEmailAvailable(email);
         Alumni a = new Alumni();
-        a.setEmail(req.email());
+        a.setEmail(email);
         a.setPassword(passwordEncoder.encode(req.password()));
+        a.setStatus(UserStatus.ACTIVE);
         a.setPhone(req.phone());
         a.setFullName(req.fullName());
         a.setUniversityId(req.universityId());
@@ -74,10 +81,12 @@ public class AuthService {
     }
 
     public AuthResponse registerEmployer(RegisterEmployerRequest req) {
-        assertEmailAvailable(req.email());
+        String email = normalizeEmail(req.email());
+        assertEmailAvailable(email);
         Employer e = new Employer();
-        e.setEmail(req.email());
+        e.setEmail(email);
         e.setPassword(passwordEncoder.encode(req.password()));
+        e.setStatus(UserStatus.ACTIVE);
         e.setPhone(req.phone());
         e.setCompanyName(req.companyName());
         e.setIndustry(req.industry());
@@ -89,10 +98,12 @@ public class AuthService {
     }
 
     public AuthResponse registerUniversity(RegisterUniversityRequest req) {
-        assertEmailAvailable(req.email());
+        String email = normalizeEmail(req.email());
+        assertEmailAvailable(email);
         University u = new University();
-        u.setEmail(req.email());
+        u.setEmail(email);
         u.setPassword(passwordEncoder.encode(req.password()));
+        u.setStatus(UserStatus.ACTIVE);
         u.setPhone(req.phone());
         u.setName(req.name());
         u.setShortName(req.shortName());
@@ -105,10 +116,12 @@ public class AuthService {
     }
 
     public AuthResponse registerClub(RegisterClubRequest req) {
-        assertEmailAvailable(req.email());
+        String email = normalizeEmail(req.email());
+        assertEmailAvailable(email);
         Club c = new Club();
-        c.setEmail(req.email());
+        c.setEmail(email);
         c.setPassword(passwordEncoder.encode(req.password()));
+        c.setStatus(UserStatus.ACTIVE);
         c.setPhone(req.phone());
         c.setName(req.name());
         c.setUniversityId(req.universityId());
@@ -121,14 +134,15 @@ public class AuthService {
     // ── Login ────────────────────────────────────────────────────────────────
 
     public AuthResponse login(LoginRequest req) {
+        String email = normalizeEmail(req.email());
         try {
             authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(req.email(), req.password())
+                    new UsernamePasswordAuthenticationToken(email, req.password())
             );
-        } catch (BadCredentialsException e) {
+        } catch (AuthenticationException e) {
             throw new InvalidCredentialsException();
         }
-        User user = userRepository.findByEmail(req.email())
+        User user = userRepository.findByEmail(email)
                 .orElseThrow(InvalidCredentialsException::new);
         return buildAuthResponse(user, toProfile(user));
     }
@@ -137,7 +151,7 @@ public class AuthService {
 
     @Transactional(readOnly = true)
     public UserProfileResponse meByEmail(String email) {
-        User user = userRepository.findByEmail(email)
+        User user = userRepository.findByEmail(normalizeEmail(email))
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
         return toProfile(user);
     }
@@ -145,9 +159,12 @@ public class AuthService {
     // ── Refresh ──────────────────────────────────────────────────────────────
 
     public AuthResponse refresh(RefreshTokenRequest req) {
+        if (!jwtService.isRefreshToken(req.refreshToken())) {
+            throw new TokenExpiredException("Invalid token type — access tokens cannot be used to refresh");
+        }
         String email;
         try {
-            email = jwtService.extractEmail(req.refreshToken());
+            email = normalizeEmail(jwtService.extractEmail(req.refreshToken()));
         } catch (Exception e) {
             throw new TokenExpiredException("Refresh token is invalid or expired");
         }
@@ -160,6 +177,11 @@ public class AuthService {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /** Lowercase + strip so Alice@Example.com and alice@example.com are the same identity. */
+    private static String normalizeEmail(String email) {
+        return email.toLowerCase(Locale.ROOT).strip();
+    }
 
     private void assertEmailAvailable(String email) {
         if (userRepository.existsByEmail(email)) {

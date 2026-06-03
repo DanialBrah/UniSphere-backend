@@ -35,6 +35,6 @@ public class Club extends User {
     @Column(name = "is_official", nullable = false)
     private boolean official = false;
 
-    @Column(name = "advisor_student_id")
+    @Column(name = "advisor_student_id", columnDefinition = "BIGINT UNSIGNED")
     private Long advisorStudentId;
 }
