@@ -18,7 +18,7 @@ public class TokenCleanupService {
     private final UserRefreshTokenRepository refreshTokenRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
 
-    @Scheduled(cron = "0 0 3 * * *")
+    @Scheduled(cron = "0 0 3 * * *", zone = "UTC")
     @Transactional
     public void purgeExpiredTokens() {
         Instant now = Instant.now();

@@ -190,13 +190,12 @@ public class AuthService {
         if (!jwtService.isRefreshTokenValid(req.refreshToken(), user)) {
             throw new TokenExpiredException("Refresh token is invalid or expired");
         }
-        // Verify the token exists in DB (not already logged out)
+        // Delete-first: the DELETE is authoritative — if it removes 0 rows the token was
+        // already consumed (logout or a concurrent refresh), closing the TOCTOU window.
         String tokenHash = hashToken(req.refreshToken());
-        if (!refreshTokenRepository.existsByTokenHash(tokenHash)) {
+        if (refreshTokenRepository.deleteByTokenHash(tokenHash) == 0) {
             throw new TokenExpiredException("Refresh token has been revoked");
         }
-        // Rotate: delete old, issue new
-        refreshTokenRepository.deleteByTokenHash(tokenHash);
         return buildAuthResponse(user, toProfile(user));
     }
 
