@@ -9,7 +9,7 @@ reviews:
       - "!target/**"
       - "!*.class"
   high_level_summary: true
-  poem: false
+  poem: true
   sequence_diagrams: true
   walkthrough: true
-  collapsed_walkthrough: false
+  collapsed_walkthrough: true
