@@ -1,6 +1,5 @@
 package com.unisphere.backend.identity.service;
 
-import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,9 +30,10 @@ public class EmailService {
             helper.setText(buildResetEmailHtml(resetLink), true);
             mailSender.send(message);
             log.info("Password reset email sent to {}", toEmail);
-        } catch (MessagingException e) {
-            // Log but never rethrow — the forgot-password response must not reveal
-            // whether an email exists or whether SMTP delivery succeeded.
+        } catch (Exception e) {
+            // Catch both MessagingException (checked) and MailException (unchecked RuntimeException
+            // thrown by JavaMailSender.send()) — never rethrow so the forgot-password response
+            // does not reveal whether an email exists or whether SMTP delivery succeeded.
             log.error("Failed to send password reset email to {}: {}", toEmail, e.getMessage());
         }
     }
