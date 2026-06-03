@@ -2,14 +2,13 @@ language: en-US
 
 reviews:
   profile: chill
-  auto_review:
-    enabled: true
-    drafts: false
-    path_filters:
-      - "!target/**"
-      - "!*.class"
+  path_filters:
+    - "!target/**"
+    - "!*.class"
   high_level_summary: true
   poem: true
   sequence_diagrams: true
-  walkthrough: true
-  collapsed_walkthrough: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
