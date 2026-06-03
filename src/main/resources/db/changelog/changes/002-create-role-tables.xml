@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+        JPA JOINED inheritance sub-tables.
+        Each table's PK is user_id (= users.id) — NOT a separate auto-increment id.
+        Column names and types match unisphere_schema.sql.
+    -->
+
+    <!-- ── students ──────────────────────────────────────────────────────── -->
+    <changeSet id="002-create-students" author="unisphere">
+        <createTable tableName="students">
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="full_name" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="matric_number" type="VARCHAR(50)"/>
+            <column name="university_email" type="VARCHAR(255)"/>
+            <column name="university_id" type="BIGINT UNSIGNED"/>
+            <column name="faculty" type="VARCHAR(255)"/>
+            <column name="program" type="VARCHAR(255)"/>
+            <column name="year_of_study" type="INT"/>
+            <column name="enrollment_date" type="DATE"/>
+            <column name="expected_graduation" type="DATE"/>
+        </createTable>
+        <addForeignKeyConstraint
+                constraintName="fk_students_user_id"
+                baseTableName="students"    baseColumnNames="user_id"
+                referencedTableName="users" referencedColumnNames="id"
+                onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- ── alumni ────────────────────────────────────────────────────────── -->
+    <changeSet id="002-create-alumni" author="unisphere">
+        <createTable tableName="alumni">
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="full_name" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="university_id" type="BIGINT UNSIGNED"/>
+            <!-- VARCHAR(4) — stores year as string e.g. "2020"; CHAR causes Hibernate type mismatch -->
+            <column name="graduation_year" type="VARCHAR(4)"/>
+            <column name="degree" type="VARCHAR(100)"/>
+            <column name="major" type="VARCHAR(255)"/>
+            <column name="current_company" type="VARCHAR(255)"/>
+            <column name="current_position" type="VARCHAR(255)"/>
+            <column name="linkedin_url" type="VARCHAR(500)"/>
+        </createTable>
+        <addForeignKeyConstraint
+                constraintName="fk_alumni_user_id"
+                baseTableName="alumni"      baseColumnNames="user_id"
+                referencedTableName="users" referencedColumnNames="id"
+                onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- ── employers ─────────────────────────────────────────────────────── -->
+    <changeSet id="002-create-employers" author="unisphere">
+        <createTable tableName="employers">
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="company_name" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="company_logo_url" type="VARCHAR(500)"/>
+            <column name="industry" type="VARCHAR(100)"/>
+            <column name="company_size" type="VARCHAR(50)"/>
+            <column name="website_url" type="VARCHAR(500)"/>
+            <column name="description" type="TEXT"/>
+            <!-- Employer account/company verification (separate from users.is_verified) -->
+            <column name="is_verified" type="TINYINT(1)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint
+                constraintName="fk_employers_user_id"
+                baseTableName="employers"   baseColumnNames="user_id"
+                referencedTableName="users" referencedColumnNames="id"
+                onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- ── universities ──────────────────────────────────────────────────── -->
+    <changeSet id="002-create-universities" author="unisphere">
+        <createTable tableName="universities">
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="short_name" type="VARCHAR(50)"/>
+            <column name="logo_url" type="VARCHAR(500)"/>
+            <column name="website_url" type="VARCHAR(500)"/>
+            <column name="address" type="VARCHAR(500)"/>
+            <column name="country" type="VARCHAR(100)"/>
+            <column name="state" type="VARCHAR(100)"/>
+            <!-- Institution-level verification (separate from users.is_verified) -->
+            <column name="is_verified" type="TINYINT(1)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint
+                constraintName="fk_universities_user_id"
+                baseTableName="universities" baseColumnNames="user_id"
+                referencedTableName="users"  referencedColumnNames="id"
+                onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- ── clubs ─────────────────────────────────────────────────────────── -->
+    <changeSet id="002-create-clubs" author="unisphere">
+        <createTable tableName="clubs">
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="university_id" type="BIGINT UNSIGNED"/>
+            <column name="description" type="TEXT"/>
+            <column name="logo_url" type="VARCHAR(500)"/>
+            <column name="category" type="VARCHAR(100)"/>
+            <column name="is_official" type="TINYINT(1)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <!-- FK to students.user_id resolved at app level — avoid circular FK at this stage -->
+            <column name="advisor_student_id" type="BIGINT"/>
+        </createTable>
+        <addForeignKeyConstraint
+                constraintName="fk_clubs_user_id"
+                baseTableName="clubs"       baseColumnNames="user_id"
+                referencedTableName="users" referencedColumnNames="id"
+                onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- ── admins ─────────────────────────────────────────────────────────── -->
+    <changeSet id="002-create-admins" author="unisphere">
+        <createTable tableName="admins">
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="full_name" type="VARCHAR(255)" defaultValue="">
+                <constraints nullable="false"/>
+            </column>
+            <!-- SUPER / MODERATOR / SUPPORT — VARCHAR avoids MySQL ENUM/Hibernate mismatch -->
+            <column name="admin_level" type="VARCHAR(20)" defaultValue="SUPPORT">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint
+                constraintName="fk_admins_user_id"
+                baseTableName="admins"      baseColumnNames="user_id"
+                referencedTableName="users" referencedColumnNames="id"
+                onDelete="CASCADE"/>
+    </changeSet>
+
+</databaseChangeLog>

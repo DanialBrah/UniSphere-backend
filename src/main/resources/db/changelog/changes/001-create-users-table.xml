@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+        Base user table — root of JOINED inheritance.
+        role / status use VARCHAR instead of MySQL ENUM so Hibernate 6
+        @Enumerated(EnumType.STRING) validation passes without type mismatch.
+    -->
+    <changeSet id="001-create-users" author="unisphere">
+        <createTable tableName="users">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="email" type="VARCHAR(255)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uq_users_email"/>
+            </column>
+            <!-- BCrypt hash stored here, never plain text -->
+            <column name="password_hash" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="phone" type="VARCHAR(20)"/>
+            <column name="avatar_url" type="VARCHAR(500)"/>
+            <!-- Discriminator for JPA JOINED inheritance + RBAC role -->
+            <column name="role" type="VARCHAR(20)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Account lifecycle: PENDING → ACTIVE → SUSPENDED / BANNED -->
+            <column name="status" type="VARCHAR(20)" defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_verified" type="TINYINT(1)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME"
+                    defaultValueComputed="CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Soft delete — application filters WHERE deleted_at IS NULL -->
+            <column name="deleted_at" type="DATETIME"/>
+        </createTable>
+
+        <createIndex tableName="users" indexName="idx_users_role">
+            <column name="role"/>
+        </createIndex>
+        <createIndex tableName="users" indexName="idx_users_status">
+            <column name="status"/>
+        </createIndex>
+        <createIndex tableName="users" indexName="idx_users_deleted_at">
+            <column name="deleted_at"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

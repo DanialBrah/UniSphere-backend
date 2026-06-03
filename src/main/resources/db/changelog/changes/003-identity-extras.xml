@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+        Supporting identity tables: verification documents and follow graph.
+        Matches unisphere_schema.sql.
+    -->
+
+    <!-- ── verification_documents ────────────────────────────────────────── -->
+    <changeSet id="003-create-verification-documents" author="unisphere">
+        <createTable tableName="verification_documents">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"/>
+            </column>
+            <!-- MATRIC_CARD | STUDENT_EMAIL | ALUMNI_CERT | EMPLOYER_REG -->
+            <column name="doc_type" type="VARCHAR(30)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- MinIO presigned URL — never expose raw bucket path to clients -->
+            <column name="document_url" type="VARCHAR(500)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- PENDING | APPROVED | REJECTED -->
+            <column name="status" type="VARCHAR(20)" defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reviewed_by" type="BIGINT UNSIGNED"/>
+            <column name="reviewed_at" type="DATETIME"/>
+            <column name="created_at" type="DATETIME" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint
+                constraintName="fk_vdoc_user"
+                baseTableName="verification_documents" baseColumnNames="user_id"
+                referencedTableName="users"            referencedColumnNames="id"
+                onDelete="CASCADE"/>
+        <addForeignKeyConstraint
+                constraintName="fk_vdoc_reviewer"
+                baseTableName="verification_documents" baseColumnNames="reviewed_by"
+                referencedTableName="users"            referencedColumnNames="id"
+                onDelete="SET NULL"/>
+        <createIndex tableName="verification_documents" indexName="idx_vdoc_user_status">
+            <column name="user_id"/>
+            <column name="status"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ── follows ───────────────────────────────────────────────────────── -->
+    <changeSet id="003-create-follows" author="unisphere">
+        <createTable tableName="follows">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="follower_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"/>
+            </column>
+            <column name="following_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint
+                tableName="follows"
+                columnNames="follower_id, following_id"
+                constraintName="uq_follow_pair"/>
+        <addForeignKeyConstraint
+                constraintName="fk_follow_follower"
+                baseTableName="follows"     baseColumnNames="follower_id"
+                referencedTableName="users" referencedColumnNames="id"
+                onDelete="CASCADE"/>
+        <addForeignKeyConstraint
+                constraintName="fk_follow_following"
+                baseTableName="follows"     baseColumnNames="following_id"
+                referencedTableName="users" referencedColumnNames="id"
+                onDelete="CASCADE"/>
+        <createIndex tableName="follows" indexName="idx_follows_following">
+            <column name="following_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>
