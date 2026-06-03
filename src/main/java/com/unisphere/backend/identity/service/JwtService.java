@@ -12,6 +12,7 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import java.util.Date;
 import java.util.HexFormat;
+import java.util.UUID;
 import java.util.function.Function;
 
 @Service
@@ -43,6 +44,7 @@ public class JwtService {
                 .claim("role", userDetails.getAuthorities().iterator().next()
                         .getAuthority().replace("ROLE_", ""))
                 .claim(CLAIM_TOKEN_TYPE, tokenType)
+                .id(UUID.randomUUID().toString())
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getSigningKey())
