@@ -1,0 +1,16 @@
+{
+  "properties": [
+    {
+      "name": "app.seeding.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Enable sample-data seeding on startup. NEVER set to true in production — creates loginable accounts with a well-known password."
+    },
+    {
+      "name": "cors.allowed-origins",
+      "type": "java.lang.String",
+      "defaultValue": "http://localhost:5173",
+      "description": "Comma-separated list of allowed CORS origins. Each value is trimmed. Example: https://app.example.com,https://admin.example.com"
+    }
+  ]
+}
