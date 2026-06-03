@@ -2,6 +2,7 @@ package com.unisphere.backend.identity.service;
 
 import com.unisphere.backend.common.exception.EmailAlreadyExistsException;
 import com.unisphere.backend.common.exception.InvalidCredentialsException;
+import com.unisphere.backend.common.exception.InvalidResetTokenException;
 import com.unisphere.backend.common.exception.TokenExpiredException;
 import com.unisphere.backend.common.exception.UserNotFoundException;
 import com.unisphere.backend.config.JwtConfig;
@@ -11,6 +12,8 @@ import com.unisphere.backend.identity.entity.UserStatus;
 import com.unisphere.backend.identity.mapper.UserMapper;
 import com.unisphere.backend.identity.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.AuthenticationException;
@@ -18,8 +21,16 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.HexFormat;
 import java.util.Locale;
 
+@Slf4j
 @Service
 @Transactional
 @RequiredArgsConstructor
@@ -31,11 +42,17 @@ public class AuthService {
     private final EmployerRepository employerRepository;
     private final UniversityRepository universityRepository;
     private final ClubRepository clubRepository;
+    private final UserRefreshTokenRepository refreshTokenRepository;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
     private final UserMapper userMapper;
     private final JwtConfig jwtConfig;
+    private final EmailService emailService;
+
+    @Value("${app.frontend-url}")
+    private String frontendUrl;
 
     // ── Register ────────────────────────────────────────────────────────────
 
@@ -170,15 +187,80 @@ public class AuthService {
         }
         User user = userRepository.findByEmail(email)
                 .orElseThrow(InvalidCredentialsException::new);
-        if (!jwtService.isTokenValid(req.refreshToken(), user)) {
+        if (!jwtService.isRefreshTokenValid(req.refreshToken(), user)) {
             throw new TokenExpiredException("Refresh token is invalid or expired");
+        }
+        // Delete-first: the DELETE is authoritative — if it removes 0 rows the token was
+        // already consumed (logout or a concurrent refresh), closing the TOCTOU window.
+        String tokenHash = hashToken(req.refreshToken());
+        if (refreshTokenRepository.deleteByTokenHash(tokenHash) == 0) {
+            throw new TokenExpiredException("Refresh token has been revoked");
         }
         return buildAuthResponse(user, toProfile(user));
     }
 
+    // ── Logout ───────────────────────────────────────────────────────────────
+
+    public void logout(String refreshToken) {
+        String tokenHash = hashToken(refreshToken);
+        refreshTokenRepository.deleteByTokenHash(tokenHash);
+    }
+
+    // ── Forgot Password ──────────────────────────────────────────────────────
+
+    public void forgotPassword(String email) {
+        String normalizedEmail = normalizeEmail(email);
+        userRepository.findByEmail(normalizedEmail).ifPresent(user -> {
+            // Invalidate any existing unused reset tokens for this user
+            passwordResetTokenRepository.invalidateAllForUser(user.getId());
+
+            // Generate a 32-byte secure random token, URL-safe Base64 encoded
+            byte[] tokenBytes = new byte[32];
+            new SecureRandom().nextBytes(tokenBytes);
+            String rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
+
+            // Store only the SHA-256 hash
+            String tokenHash = hashToken(rawToken);
+            Instant expiresAt = Instant.now().plusSeconds(15 * 60);
+            passwordResetTokenRepository.save(new PasswordResetToken(tokenHash, user.getId(), expiresAt));
+
+            // Send email asynchronously — fire and forget
+            String resetLink = frontendUrl + "/reset-password?token=" + rawToken;
+            emailService.sendPasswordResetEmail(normalizedEmail, resetLink);
+        });
+        // Always returns without revealing whether the email is registered
+    }
+
+    // ── Reset Password ───────────────────────────────────────────────────────
+
+    public void resetPassword(String rawToken, String newPassword) {
+        String tokenHash = hashToken(rawToken);
+
+        PasswordResetToken prt = passwordResetTokenRepository.findByTokenHash(tokenHash)
+                .orElseThrow(() -> new InvalidResetTokenException("Invalid or expired reset token"));
+
+        if (prt.isUsed()) {
+            throw new InvalidResetTokenException("This reset link has already been used");
+        }
+        if (prt.isExpired()) {
+            throw new InvalidResetTokenException("This reset link has expired");
+        }
+
+        User user = userRepository.findById(prt.getUserId())
+                .orElseThrow(() -> new UserNotFoundException("User account no longer exists"));
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+
+        prt.setUsed(true);
+        passwordResetTokenRepository.save(prt);
+
+        // Revoke all active sessions on password reset for security
+        refreshTokenRepository.deleteByUserId(user.getId());
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    /** Lowercase + strip so Alice@Example.com and alice@example.com are the same identity. */
     private static String normalizeEmail(String email) {
         return email.toLowerCase(Locale.ROOT).strip();
     }
@@ -190,12 +272,26 @@ public class AuthService {
     }
 
     private AuthResponse buildAuthResponse(User user, UserProfileResponse profile) {
+        String refreshToken = jwtService.generateRefreshToken(user);
+        // Persist the refresh token hash so logout/rotation can validate it
+        Instant expiresAt = jwtService.extractExpiration(refreshToken);
+        refreshTokenRepository.save(new UserRefreshToken(user.getId(), hashToken(refreshToken), expiresAt));
         return new AuthResponse(
                 jwtService.generateToken(user),
-                jwtService.generateRefreshToken(user),
+                refreshToken,
                 jwtConfig.getExpiration(),
                 profile
         );
+    }
+
+    private String hashToken(String raw) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(raw.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 
     private UserProfileResponse toProfile(User user) {

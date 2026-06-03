@@ -11,5 +11,7 @@
     <include file="changes/004-rename-document-url-to-key.xml"        relativeToChangelogFile="true"/>
     <include file="changes/005-add-university-id-foreign-keys.xml"       relativeToChangelogFile="true"/>
     <include file="changes/006-fix-advisor-student-id-type.xml"          relativeToChangelogFile="true"/>
+    <include file="changes/007-user-refresh-tokens.xml"                   relativeToChangelogFile="true"/>
+    <include file="changes/008-password-reset-tokens.xml"                 relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

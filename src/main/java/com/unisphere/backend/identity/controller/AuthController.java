@@ -79,4 +79,37 @@ public class AuthController {
             @Valid @RequestBody RefreshTokenRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(authService.refresh(request)));
     }
+
+    @Operation(
+            summary = "Logout the current user",
+            description = "Revokes the provided refresh token server-side. The short-lived access token expires naturally."
+    )
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(
+            @Valid @RequestBody LogoutRequest request) {
+        authService.logout(request.refreshToken());
+        return ResponseEntity.ok(ApiResponse.ok(null, "Logged out successfully"));
+    }
+
+    @Operation(
+            summary = "Request a password reset email",
+            description = "Sends a reset link to the address if it is registered. Always returns 200 to prevent email enumeration."
+    )
+    @PostMapping("/forgot-password")
+    public ResponseEntity<ApiResponse<Void>> forgotPassword(
+            @Valid @RequestBody ForgotPasswordRequest request) {
+        authService.forgotPassword(request.email());
+        return ResponseEntity.ok(ApiResponse.ok(null, "If that email is registered, a reset link has been sent"));
+    }
+
+    @Operation(
+            summary = "Reset password using a reset token",
+            description = "Validates the one-time token from the reset email and updates the user's password."
+    )
+    @PostMapping("/reset-password")
+    public ResponseEntity<ApiResponse<Void>> resetPassword(
+            @Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request.token(), request.newPassword());
+        return ResponseEntity.ok(ApiResponse.ok(null, "Password reset successfully"));
+    }
 }
