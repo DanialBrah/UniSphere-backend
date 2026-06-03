@@ -61,6 +61,18 @@ public class JwtService {
         }
     }
 
+    /** True only when the token is a valid, unexpired refresh token for the given user. */
+    public boolean isRefreshTokenValid(String token, UserDetails userDetails) {
+        try {
+            final String username = extractUsername(token);
+            return username.equals(userDetails.getUsername())
+                    && !isTokenExpired(token)
+                    && TYPE_REFRESH.equals(extractTokenType(token));
+        } catch (JwtException e) {
+            return false;
+        }
+    }
+
     /** True only when the token carries the refresh token_type claim. */
     public boolean isRefreshToken(String token) {
         try {
@@ -68,6 +80,11 @@ public class JwtService {
         } catch (JwtException e) {
             return false;
         }
+    }
+
+    /** Extracts token expiration as a java.time.Instant for DB storage. */
+    public java.time.Instant extractExpiration(String token) {
+        return extractClaim(token, Claims::getExpiration).toInstant();
     }
 
     public String extractEmail(String token) {

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+        Stores hashed refresh tokens so the server can invalidate them on logout.
+        Only the SHA-256 hex hash is stored — the raw JWT is never persisted.
+        On logout the row is deleted; on refresh the row is replaced (token rotation).
+    -->
+    <changeSet id="007-create-user-refresh-tokens" author="unisphere">
+        <createTable tableName="user_refresh_tokens">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"/>
+            </column>
+            <!-- SHA-256 hex hash of the raw refresh JWT (64 hex chars) -->
+            <column name="token_hash" type="VARCHAR(64)">
+                <constraints nullable="false" unique="true"
+                             uniqueConstraintName="uq_urt_token_hash"/>
+            </column>
+            <column name="expires_at" type="DATETIME">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+                constraintName="fk_urt_user"
+                baseTableName="user_refresh_tokens" baseColumnNames="user_id"
+                referencedTableName="users"          referencedColumnNames="id"
+                onDelete="CASCADE"/>
+
+        <createIndex tableName="user_refresh_tokens" indexName="idx_urt_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <createIndex tableName="user_refresh_tokens" indexName="idx_urt_expires_at">
+            <column name="expires_at"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

@@ -90,6 +90,12 @@
 			<optional>true</optional>
 		</dependency>
 
+		<!-- ── Email (SMTP) ─────────────────────────────────────── -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-mail</artifactId>
+		</dependency>
+
 		<!-- ── .env loader ───────────────────────────────────────── -->
 		<dependency>
 			<groupId>io.github.cdimascio</groupId>
