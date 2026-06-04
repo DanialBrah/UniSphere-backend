@@ -1,40 +1,41 @@
 package com.unisphere.backend.identity.service;
 
-import jakarta.mail.internet.MimeMessage;
-import lombok.RequiredArgsConstructor;
+import com.resend.Resend;
+import com.resend.core.exception.ResendException;
+import com.resend.services.emails.model.CreateEmailOptions;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class EmailService {
 
-    private final JavaMailSender mailSender;
+    private final Resend resend;
 
     @Value("${app.mail.from}")
     private String mailFrom;
 
+    public EmailService(@Value("${resend.api-key}") String apiKey) {
+        this.resend = new Resend(apiKey);
+    }
+
     @Async
     public void sendPasswordResetEmail(String toEmail, String resetLink) {
         try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-            helper.setFrom(mailFrom);
-            helper.setTo(toEmail);
-            helper.setSubject("Reset your UniSphere password");
-            helper.setText(buildResetEmailHtml(resetLink), true);
-            mailSender.send(message);
+            CreateEmailOptions params = CreateEmailOptions.builder()
+                    .from(mailFrom)
+                    .to(toEmail)
+                    .subject("Reset your UniSphere password")
+                    .html(buildResetEmailHtml(resetLink))
+                    .build();
+            resend.emails().send(params);
             log.info("Password reset email sent to {}", toEmail);
-        } catch (Exception e) {
-            // Catch both MessagingException (checked) and MailException (unchecked RuntimeException
-            // thrown by JavaMailSender.send()) — never rethrow so the forgot-password response
-            // does not reveal whether an email exists or whether SMTP delivery succeeded.
+        } catch (ResendException e) {
             log.error("Failed to send password reset email to {}: {}", toEmail, e.getMessage());
+        } catch (Exception e) {
+            log.error("Unexpected error sending password reset email to {}: {}", toEmail, e.getMessage());
         }
     }
 
