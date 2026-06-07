@@ -4,11 +4,13 @@ import com.unisphere.backend.social.posting.entity.PostSave;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.transaction.annotation.Transactional;
 
 public interface PostSaveRepository extends JpaRepository<PostSave, Long> {
 
     boolean existsByUserIdAndPostId(Long userId, Long postId);
 
+    @Transactional
     void deleteByUserIdAndPostId(Long userId, Long postId);
 
     Page<PostSave> findByUserIdOrderBySavedAtDesc(Long userId, Pageable pageable);

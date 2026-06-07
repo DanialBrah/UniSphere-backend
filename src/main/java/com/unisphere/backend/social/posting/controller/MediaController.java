@@ -35,9 +35,9 @@ public class MediaController {
         return ResponseEntity.ok(ApiResponse.ok(mediaService.uploadFile(file, currentUser), "File uploaded"));
     }
 
-    @DeleteMapping("/{mediaKey}")
+    @DeleteMapping
     public ResponseEntity<ApiResponse<Void>> deleteMedia(
-            @PathVariable String mediaKey,
+            @RequestParam String mediaKey,
             @AuthenticationPrincipal User currentUser) {
         mediaService.deleteMedia(mediaKey, currentUser);
         return ResponseEntity.ok(ApiResponse.ok(null, "Media deleted"));

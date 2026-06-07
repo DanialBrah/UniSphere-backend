@@ -4,12 +4,15 @@ import com.unisphere.backend.social.posting.repository.CommentRepository;
 import com.unisphere.backend.social.posting.repository.PostRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 
 @Slf4j
 @Component
@@ -33,9 +36,7 @@ public class LikeFlushScheduler {
     }
 
     private void flushPostLikes() {
-        Set<String> keys = redisTemplate.keys("post:likes:*");
-        if (keys == null || keys.isEmpty()) return;
-
+        List<String> keys = scanKeys("post:likes:*");
         for (String key : keys) {
             try {
                 Long delta = redisTemplate.opsForValue().getAndDelete(key);
@@ -49,9 +50,7 @@ public class LikeFlushScheduler {
     }
 
     private void flushPostViews() {
-        Set<String> keys = redisTemplate.keys("post:views:*");
-        if (keys == null || keys.isEmpty()) return;
-
+        List<String> keys = scanKeys("post:views:*");
         for (String key : keys) {
             try {
                 Long delta = redisTemplate.opsForValue().getAndDelete(key);
@@ -65,9 +64,7 @@ public class LikeFlushScheduler {
     }
 
     private void flushCommentLikes() {
-        Set<String> keys = redisTemplate.keys("comment:likes:*");
-        if (keys == null || keys.isEmpty()) return;
-
+        List<String> keys = scanKeys("comment:likes:*");
         for (String key : keys) {
             try {
                 Long delta = redisTemplate.opsForValue().getAndDelete(key);
@@ -78,5 +75,19 @@ public class LikeFlushScheduler {
                 log.warn("Failed to flush comment likes for key {}: {}", key, ex.getMessage());
             }
         }
+    }
+
+    /**
+     * Uses SCAN instead of KEYS to avoid blocking Redis on large keyspaces.
+     */
+    private List<String> scanKeys(String pattern) {
+        List<String> keys = new ArrayList<>();
+        ScanOptions options = ScanOptions.scanOptions().match(pattern).count(100).build();
+        try (Cursor<String> cursor = redisTemplate.scan(options)) {
+            cursor.forEachRemaining(keys::add);
+        } catch (Exception ex) {
+            log.warn("Failed to scan Redis keys for pattern {}: {}", pattern, ex.getMessage());
+        }
+        return keys;
     }
 }
