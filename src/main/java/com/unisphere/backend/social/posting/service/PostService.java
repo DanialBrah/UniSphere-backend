@@ -81,11 +81,10 @@ public class PostService {
                 .map(post -> toPostResponse(post, currentUser));
     }
 
-    @Transactional(readOnly = true)
     public PostResponse getPostById(Long postId, User currentUser) {
         Post post = findActivePost(postId);
         redisIncrement(REDIS_POST_VIEWS + postId, 1);
-        return toPostResponse(post, currentUser);
+
     }
 
     @Transactional(readOnly = true)
