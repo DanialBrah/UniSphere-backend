@@ -20,6 +20,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 
+import java.io.InputStream;
 import java.time.Duration;
 import java.util.Set;
 import java.util.UUID;
@@ -89,10 +90,10 @@ public class MediaService {
         String mediaKey = "posts/" + currentUser.getId() + "/" + UUID.randomUUID() + "." + ext;
         String contentType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
 
-        try {
+        try (InputStream inputStream = file.getInputStream()) {
             s3Client.putObject(
                     b -> b.bucket(bucket).key(mediaKey).contentType(contentType),
-                    RequestBody.fromBytes(file.getBytes())
+                    RequestBody.fromInputStream(inputStream, file.getSize())
             );
         } catch (Exception ex) {
             throw new MediaUploadException("Failed to upload file to B2: " + ex.getMessage(), ex);

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 public interface CommentRepository extends JpaRepository<Comment, Long> {
 
@@ -19,6 +20,7 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
     long countByParentCommentId(Long parentCommentId);
 
     @Modifying
+    @Transactional
     @Query("UPDATE Comment c SET c.likesCount = c.likesCount + :delta WHERE c.id = :id")
     void incrementLikesCount(@Param("id") Long id, @Param("delta") long delta);
 }

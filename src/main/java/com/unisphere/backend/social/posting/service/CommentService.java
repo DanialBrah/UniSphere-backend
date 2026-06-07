@@ -92,11 +92,11 @@ public class CommentService {
 
         if (commentLikeRepository.existsByCommentIdAndUserId(commentId, userId)) {
             commentLikeRepository.deleteByCommentIdAndUserId(commentId, userId);
-            redisTemplate.opsForValue().decrement(REDIS_COMMENT_LIKES + commentId);
+            redisIncrement(REDIS_COMMENT_LIKES + commentId, -1);
             return new LikeToggleResponse(false, effectiveLikeCount(commentId));
         } else {
             commentLikeRepository.save(new CommentLike(commentId, userId));
-            redisTemplate.opsForValue().increment(REDIS_COMMENT_LIKES + commentId);
+            redisIncrement(REDIS_COMMENT_LIKES + commentId, 1);
             return new LikeToggleResponse(true, effectiveLikeCount(commentId));
         }
     }

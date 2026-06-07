@@ -10,7 +10,7 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "post_saves")
+@Table(name = "post_saves", uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "post_id"}))
 @EntityListeners(AuditingEntityListener.class)
 @Getter
 @Setter

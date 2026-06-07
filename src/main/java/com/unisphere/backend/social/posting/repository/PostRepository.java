@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
@@ -28,10 +29,12 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     Page<Post> searchFullText(@Param("query") String query, Pageable pageable);
 
     @Modifying
+    @Transactional
     @Query("UPDATE Post p SET p.likesCount = p.likesCount + :delta WHERE p.id = :id")
     void incrementLikesCount(@Param("id") Long id, @Param("delta") long delta);
 
     @Modifying
+    @Transactional
     @Query("UPDATE Post p SET p.viewsCount = p.viewsCount + :delta WHERE p.id = :id")
     void incrementViewsCount(@Param("id") Long id, @Param("delta") long delta);
 }

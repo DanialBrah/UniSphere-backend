@@ -39,7 +39,6 @@ public class RedisConfig {
         if (sslEnabled) {
             clientConfig = LettuceClientConfiguration.builder()
                     .useSsl()
-                    .disablePeerVerification()
                     .build();
         } else {
             clientConfig = LettuceClientConfiguration.builder().build();
