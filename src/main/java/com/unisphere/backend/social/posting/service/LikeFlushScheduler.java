@@ -77,7 +77,7 @@ public class LikeFlushScheduler {
     }
 
     private List<String> scanKeys(String pattern) {
-        return redisTemplate.execute((RedisCallback<List<String>>) connection -> {
+        List<String> keys = redisTemplate.execute((RedisCallback<List<String>>) connection -> {
             List<String> result = new ArrayList<>();
             try (Cursor<byte[]> cursor = connection.keyCommands().scan(
                     ScanOptions.scanOptions().match(pattern).count(100).build())) {
@@ -89,5 +89,6 @@ public class LikeFlushScheduler {
             }
             return result;
         });
+        return keys != null ? keys : List.of();
     }
 }
