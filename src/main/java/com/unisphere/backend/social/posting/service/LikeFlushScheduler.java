@@ -36,43 +36,55 @@ public class LikeFlushScheduler {
 
     private void flushPostLikes() {
         for (String key : scanKeys("post:likes:*")) {
+            Long delta = null;
             try {
-                Long delta = redisTemplate.opsForValue().get(key);
+                delta = redisTemplate.opsForValue().getAndSet(key, 0L);
                 if (delta == null || delta == 0) continue;
                 Long postId = Long.parseLong(key.substring("post:likes:".length()));
                 postRepository.incrementLikesCount(postId, delta);
-                redisTemplate.delete(key);
             } catch (Exception ex) {
                 log.warn("Failed to flush post likes for key {}: {}", key, ex.getMessage());
+                restoreDelta(key, delta);
             }
         }
     }
 
     private void flushPostViews() {
         for (String key : scanKeys("post:views:*")) {
+            Long delta = null;
             try {
-                Long delta = redisTemplate.opsForValue().get(key);
+                delta = redisTemplate.opsForValue().getAndSet(key, 0L);
                 if (delta == null || delta == 0) continue;
                 Long postId = Long.parseLong(key.substring("post:views:".length()));
                 postRepository.incrementViewsCount(postId, delta);
-                redisTemplate.delete(key);
             } catch (Exception ex) {
                 log.warn("Failed to flush post views for key {}: {}", key, ex.getMessage());
+                restoreDelta(key, delta);
             }
         }
     }
 
     private void flushCommentLikes() {
         for (String key : scanKeys("comment:likes:*")) {
+            Long delta = null;
             try {
-                Long delta = redisTemplate.opsForValue().get(key);
+                delta = redisTemplate.opsForValue().getAndSet(key, 0L);
                 if (delta == null || delta == 0) continue;
                 Long commentId = Long.parseLong(key.substring("comment:likes:".length()));
                 commentRepository.incrementLikesCount(commentId, delta);
-                redisTemplate.delete(key);
             } catch (Exception ex) {
                 log.warn("Failed to flush comment likes for key {}: {}", key, ex.getMessage());
+                restoreDelta(key, delta);
             }
+        }
+    }
+
+    private void restoreDelta(String key, Long delta) {
+        if (delta == null || delta == 0) return;
+        try {
+            redisTemplate.opsForValue().increment(key, delta);
+        } catch (Exception ex) {
+            log.error("Delta {} for key {} lost — Redis restore failed: {}", delta, key, ex.getMessage());
         }
     }
 
