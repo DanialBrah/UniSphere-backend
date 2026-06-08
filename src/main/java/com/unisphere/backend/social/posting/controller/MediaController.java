@@ -35,11 +35,13 @@ public class MediaController {
         return ResponseEntity.ok(ApiResponse.ok(mediaService.uploadFile(file, currentUser), "File uploaded"));
     }
 
-    @DeleteMapping("/{mediaKey}")
+    @DeleteMapping("/{*mediaKey}")
     public ResponseEntity<ApiResponse<Void>> deleteMedia(
             @PathVariable String mediaKey,
             @AuthenticationPrincipal User currentUser) {
-        mediaService.deleteMedia(mediaKey, currentUser);
+        // PathPatternParser captures the rest-of-path with a leading "/", strip it
+        String key = mediaKey.startsWith("/") ? mediaKey.substring(1) : mediaKey;
+        mediaService.deleteMedia(key, currentUser);
         return ResponseEntity.ok(ApiResponse.ok(null, "Media deleted"));
     }
 }

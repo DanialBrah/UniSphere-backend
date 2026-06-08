@@ -90,7 +90,7 @@ class MediaControllerTest extends AbstractPostingIntegrationTest {
         // mediaKey must start with posts/{userId}/
         String mediaKey = "posts/" + userId + "/test-photo.jpg";
 
-        mockMvc.perform(delete(BASE + "/{mediaKey}", mediaKey)
+        mockMvc.perform(delete(BASE + "/" + mediaKey)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
@@ -103,7 +103,7 @@ class MediaControllerTest extends AbstractPostingIntegrationTest {
         // Key belongs to user 99999, not the current user
         String otherUsersKey = "posts/99999/stolen-photo.jpg";
 
-        mockMvc.perform(delete(BASE + "/{mediaKey}", otherUsersKey)
+        mockMvc.perform(delete(BASE + "/" + otherUsersKey)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden());
     }
