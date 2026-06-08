@@ -115,9 +115,7 @@ public class CommentService {
     }
 
     private long effectiveLikeCount(Long commentId) {
-        Comment c = commentRepository.findById(commentId).orElse(null);
-        if (c == null) return 0;
-        return c.getLikesCount() + redisGetDelta(REDIS_COMMENT_LIKES + commentId);
+        return commentLikeRepository.countByCommentId(commentId);
     }
 
     CommentResponse toCommentResponse(Comment comment, User currentUser) {

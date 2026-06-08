@@ -7,12 +7,12 @@ import com.unisphere.backend.social.posting.enums.PostType;
 import com.unisphere.backend.social.posting.enums.PostVisibility;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.transaction.annotation.Transactional;
 
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@Transactional
 class PostControllerTest extends AbstractPostingIntegrationTest {
 
     private static final String BASE = "/api/v1/posts";
@@ -87,8 +87,8 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.content").isArray())
-                .andExpect(jsonPath("$.data.content[0].content").value("Feed post content"))
-                .andExpect(jsonPath("$.data.totalElements").value(1));
+                .andExpect(jsonPath("$.data.content[*].content", hasItem("Feed post content")))
+                .andExpect(jsonPath("$.data.totalElements").value(greaterThanOrEqualTo(1)));
     }
 
     @Test

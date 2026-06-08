@@ -5,13 +5,11 @@ import com.unisphere.backend.social.posting.dto.request.MediaPresignRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.transaction.annotation.Transactional;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@Transactional
 class MediaControllerTest extends AbstractPostingIntegrationTest {
 
     private static final String BASE = "/api/v1/media";
