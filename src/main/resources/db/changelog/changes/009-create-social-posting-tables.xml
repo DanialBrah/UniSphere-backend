@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         posts
+         users.id is BIGINT UNSIGNED — all FKs referencing it must match.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="009-01" author="system">
+        <createTable tableName="posts">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_posts_user" references="users(id)"/>
+            </column>
+            <column name="title" type="VARCHAR(255)"/>
+            <column name="content" type="TEXT"/>
+            <column name="post_type" type="ENUM('TEXT','IMAGE','VIDEO','LINK','POLL')" defaultValue="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="visibility" type="ENUM('PUBLIC','UNIVERSITY','FRIENDS','PRIVATE')" defaultValue="PUBLIC">
+                <constraints nullable="false"/>
+            </column>
+            <column name="university_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true" foreignKeyName="fk_posts_university" references="users(id)"/>
+            </column>
+            <column name="is_pinned" type="TINYINT(1)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="views_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="likes_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)"/>
+        </createTable>
+
+        <createIndex tableName="posts" indexName="idx_posts_user_created">
+            <column name="user_id"/>
+            <column name="created_at"/>
+        </createIndex>
+        <createIndex tableName="posts" indexName="idx_posts_university">
+            <column name="university_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- FULLTEXT index must be raw SQL — Liquibase has no direct element for it -->
+    <changeSet id="009-02" author="system">
+        <sql>ALTER TABLE posts ADD FULLTEXT INDEX ft_posts_title_content (title, content)</sql>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         post_media
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="009-03" author="system">
+        <createTable tableName="post_media">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="post_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_post_media_post" references="posts(id)"/>
+            </column>
+            <column name="media_url" type="VARCHAR(500)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="media_type" type="ENUM('IMAGE','VIDEO')">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sort_order" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <createIndex tableName="post_media" indexName="idx_post_media_post">
+            <column name="post_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         post_tags
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="009-04" author="system">
+        <createTable tableName="post_tags">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="post_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_post_tags_post" references="posts(id)"/>
+            </column>
+            <column name="tagged_user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_post_tags_user" references="users(id)"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="post_tags" columnNames="post_id,tagged_user_id"
+                             constraintName="uq_post_tags"/>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         comments
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="009-05" author="system">
+        <createTable tableName="comments">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="post_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_comments_post" references="posts(id)"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_comments_user" references="users(id)"/>
+            </column>
+            <column name="parent_comment_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true" foreignKeyName="fk_comments_parent" references="comments(id)"/>
+            </column>
+            <column name="content" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="likes_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)"/>
+        </createTable>
+
+        <createIndex tableName="comments" indexName="idx_comments_post">
+            <column name="post_id"/>
+        </createIndex>
+        <createIndex tableName="comments" indexName="idx_comments_parent">
+            <column name="parent_comment_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         post_likes
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="009-06" author="system">
+        <createTable tableName="post_likes">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="post_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_post_likes_post" references="posts(id)"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_post_likes_user" references="users(id)"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="post_likes" columnNames="post_id,user_id"
+                             constraintName="uq_post_likes"/>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         comment_likes
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="009-07" author="system">
+        <createTable tableName="comment_likes">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="comment_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_comment_likes_comment" references="comments(id)"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_comment_likes_user" references="users(id)"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="comment_likes" columnNames="comment_id,user_id"
+                             constraintName="uq_comment_likes"/>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         post_saves
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="009-08" author="system">
+        <createTable tableName="post_saves">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_post_saves_user" references="users(id)"/>
+            </column>
+            <column name="post_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_post_saves_post" references="posts(id)"/>
+            </column>
+            <column name="saved_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="post_saves" columnNames="user_id,post_id"
+                             constraintName="uq_post_saves"/>
+    </changeSet>
+
+</databaseChangeLog>
