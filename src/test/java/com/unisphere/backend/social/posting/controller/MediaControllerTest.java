@@ -72,6 +72,34 @@ class MediaControllerTest extends AbstractPostingIntegrationTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    // ── Presign avatar ────────────────────────────────────────────────────────
+
+    @Test
+    void presignAvatar_validImageFile_returns200WithAvatarKey() throws Exception {
+        String token = registerStudentAndGetToken("avatar.presign@test.com", "MAT3006");
+
+        MediaPresignRequest req = new MediaPresignRequest("avatar.jpg", "image/jpeg");
+
+        mockMvc.perform(post(BASE + "/presign-avatar")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.uploadUrl").isNotEmpty())
+                .andExpect(jsonPath("$.data.mediaKey").value(
+                        org.hamcrest.Matchers.containsString("avatars/")));
+    }
+
+    @Test
+    void presignAvatar_withoutAuth_returns401() throws Exception {
+        MediaPresignRequest req = new MediaPresignRequest("avatar.jpg", "image/jpeg");
+
+        mockMvc.perform(post(BASE + "/presign-avatar")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isUnauthorized());
+    }
+
     // ── Delete media ──────────────────────────────────────────────────────────
 
     @Test

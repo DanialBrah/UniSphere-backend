@@ -28,6 +28,13 @@ public class MediaController {
         return ResponseEntity.ok(ApiResponse.ok(mediaService.presignUpload(req, currentUser)));
     }
 
+    @PostMapping("/presign-avatar")
+    public ResponseEntity<ApiResponse<MediaPresignResponse>> presignAvatar(
+            @Valid @RequestBody MediaPresignRequest req,
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(ApiResponse.ok(mediaService.presignAvatarUpload(req, currentUser)));
+    }
+
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<MediaUploadResponse>> uploadFile(
             @RequestParam("file") MultipartFile file,

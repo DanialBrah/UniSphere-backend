@@ -148,7 +148,7 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
         String token = registerStudentAndGetToken("post.update@test.com", "MAT1007");
         Long postId = createTextPost(token, "Original content");
 
-        UpdatePostRequest update = new UpdatePostRequest("Updated title", "Updated content", PostVisibility.FRIENDS);
+        UpdatePostRequest update = new UpdatePostRequest("Updated title", "Updated content", PostVisibility.FRIENDS, null, null);
 
         mockMvc.perform(put(BASE + "/{postId}", postId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -165,7 +165,7 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
         String otherToken  = registerStudentAndGetToken("post.other@test.com", "MAT1009");
         Long postId = createTextPost(ownerToken, "Owner's post");
 
-        UpdatePostRequest update = new UpdatePostRequest(null, "Hacked!", null);
+        UpdatePostRequest update = new UpdatePostRequest(null, "Hacked!", null, null, null);
 
         mockMvc.perform(put(BASE + "/{postId}", postId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -275,5 +275,137 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.content").isArray());
+    }
+
+    // ── Liked posts ───────────────────────────────────────────────────────────
+
+    @Test
+    void getLikedPosts_afterLike_containsPost() throws Exception {
+        String token = registerStudentAndGetToken("liked.posts@test.com", "MAT1018");
+        Long postId = createTextPost(token, "Post to like");
+
+        mockMvc.perform(post(BASE + "/{postId}/like", postId)
+                .header("Authorization", "Bearer " + token));
+
+        mockMvc.perform(get(BASE + "/liked?page=0&size=10")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].id").value(postId))
+                .andExpect(jsonPath("$.data.totalElements").value(greaterThanOrEqualTo(1)));
+    }
+
+    @Test
+    void getLikedPosts_withoutAuth_returns401() throws Exception {
+        mockMvc.perform(get(BASE + "/liked"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void getLikedPosts_afterUnlike_doesNotContainPost() throws Exception {
+        String token = registerStudentAndGetToken("liked.toggle@test.com", "MAT1019");
+        Long postId = createTextPost(token, "Post to like then unlike");
+
+        // Like then unlike
+        mockMvc.perform(post(BASE + "/{postId}/like", postId)
+                .header("Authorization", "Bearer " + token));
+        mockMvc.perform(post(BASE + "/{postId}/like", postId)
+                .header("Authorization", "Bearer " + token));
+
+        mockMvc.perform(get(BASE + "/liked?page=0&size=10")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.id == " + postId + ")]").isEmpty());
+    }
+
+    // ── Saved posts ───────────────────────────────────────────────────────────
+
+    @Test
+    void getSavedPosts_afterSave_containsPost() throws Exception {
+        String token = registerStudentAndGetToken("saved.posts@test.com", "MAT1020");
+        Long postId = createTextPost(token, "Post to save");
+
+        mockMvc.perform(post(BASE + "/{postId}/save", postId)
+                .header("Authorization", "Bearer " + token));
+
+        mockMvc.perform(get(BASE + "/saved?page=0&size=10")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].id").value(postId))
+                .andExpect(jsonPath("$.data.totalElements").value(greaterThanOrEqualTo(1)));
+    }
+
+    @Test
+    void getSavedPosts_withoutAuth_returns401() throws Exception {
+        mockMvc.perform(get(BASE + "/saved"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ── Update post: media add/remove ─────────────────────────────────────────
+
+    @Test
+    void updatePost_addMedia_appendsToPost() throws Exception {
+        String token = registerStudentAndGetToken("media.add@test.com", "MAT1021");
+        Long postId = createTextPost(token, "Post without media");
+
+        Long userId = objectMapper.readTree(
+                        mockMvc.perform(get("/api/v1/auth/me")
+                                        .header("Authorization", "Bearer " + token))
+                                .andReturn().getResponse().getContentAsString())
+                .at("/data/id").asLong();
+
+        UpdatePostRequest.MediaItem item = new UpdatePostRequest.MediaItem(
+                "posts/" + userId + "/new-photo.jpg", "image/jpeg");
+        UpdatePostRequest req = new UpdatePostRequest(null, null, null,
+                java.util.List.of(item), null);
+
+        mockMvc.perform(put(BASE + "/{postId}", postId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.media").isArray())
+                .andExpect(jsonPath("$.data.media[0].mediaUrl").value("posts/" + userId + "/new-photo.jpg"));
+    }
+
+    @Test
+    void updatePost_removeMedia_shrinksMediaList() throws Exception {
+        String token = registerStudentAndGetToken("media.remove@test.com", "MAT1022");
+
+        // Create post with one media item
+        Long userId = objectMapper.readTree(
+                        mockMvc.perform(get("/api/v1/auth/me")
+                                        .header("Authorization", "Bearer " + token))
+                                .andReturn().getResponse().getContentAsString())
+                .at("/data/id").asLong();
+
+        CreatePostRequest.MediaItem mediaItem = new CreatePostRequest.MediaItem(
+                "posts/" + userId + "/to-remove.jpg", "image/jpeg");
+        com.unisphere.backend.social.posting.dto.request.CreatePostRequest createReq =
+                new com.unisphere.backend.social.posting.dto.request.CreatePostRequest(
+                        "Media Post", "Has media",
+                        com.unisphere.backend.social.posting.enums.PostType.IMAGE,
+                        com.unisphere.backend.social.posting.enums.PostVisibility.PUBLIC,
+                        null, null, java.util.List.of(mediaItem));
+
+        String createResponse = mockMvc.perform(post(BASE)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
+                        .content(objectMapper.writeValueAsString(createReq)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        Long postId  = objectMapper.readTree(createResponse).at("/data/id").asLong();
+        Long mediaId = objectMapper.readTree(createResponse).at("/data/media/0/id").asLong();
+
+        // Remove that media item
+        UpdatePostRequest removeReq = new UpdatePostRequest(null, null, null,
+                null, java.util.List.of(mediaId));
+
+        mockMvc.perform(put(BASE + "/{postId}", postId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
+                        .content(objectMapper.writeValueAsString(removeReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.media").isEmpty());
     }
 }

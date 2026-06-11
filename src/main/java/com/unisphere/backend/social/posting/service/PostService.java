@@ -103,6 +103,23 @@ public class PostService {
         if (req.content() != null)    post.setContent(req.content());
         if (req.visibility() != null) post.setVisibility(req.visibility());
 
+        if (req.removeMediaIds() != null && !req.removeMediaIds().isEmpty()) {
+            post.getMedia().removeIf(m -> req.removeMediaIds().contains(m.getId()));
+        }
+
+        if (req.addMedia() != null && !req.addMedia().isEmpty()) {
+            int nextOrder = post.getMedia().stream()
+                    .mapToInt(PostMedia::getSortOrder).max().orElse(-1) + 1;
+            for (UpdatePostRequest.MediaItem item : req.addMedia()) {
+                PostMedia m = new PostMedia();
+                m.setPost(post);
+                m.setMediaUrl(item.mediaKey());
+                m.setMediaType(resolveMediaType(item.mediaType()));
+                m.setSortOrder(nextOrder++);
+                post.getMedia().add(m);
+            }
+        }
+
         return toPostResponse(postRepository.save(post), currentUser);
     }
 
@@ -141,6 +158,18 @@ public class PostService {
             postSaveRepository.save(new PostSave(userId, postId));
             return new SaveToggleResponse(true);
         }
+    }
+
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getLikedPosts(Pageable pageable, User currentUser) {
+        return postRepository.findLikedPostsByUserId(currentUser.getId(), pageable)
+                .map(post -> toPostResponse(post, currentUser));
+    }
+
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getSavedPosts(Pageable pageable, User currentUser) {
+        return postRepository.findSavedPostsByUserId(currentUser.getId(), pageable)
+                .map(post -> toPostResponse(post, currentUser));
     }
 
     @Transactional(readOnly = true)
