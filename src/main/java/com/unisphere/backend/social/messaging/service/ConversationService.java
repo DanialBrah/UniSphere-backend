@@ -43,6 +43,9 @@ public class ConversationService {
                 throw new IllegalArgumentException("Direct conversation requires exactly one participant");
             }
             Long otherId = req.participantIds().get(0);
+            if (otherId.equals(currentUser.getId())) {
+                throw new IllegalArgumentException("Cannot create a direct conversation with yourself");
+            }
             return conversationRepository
                     .findDirectConversation(currentUser.getId(), otherId)
                     .map(existing -> toResponse(existing, currentUser.getId()))
@@ -60,25 +63,28 @@ public class ConversationService {
 
     @Transactional(readOnly = true)
     public ConversationResponse getConversation(Long convId, User currentUser) {
-        assertMembership(convId, currentUser.getId());
         Conversation conv = conversationRepository.findById(convId)
                 .orElseThrow(() -> new ConversationNotFoundException(convId));
+        assertMembership(convId, currentUser.getId());
         return toResponse(conv, currentUser.getId());
     }
 
     public MemberSummary addMember(Long convId, AddMemberRequest req, User currentUser) {
         assertAdmin(convId, currentUser.getId());
+
+        User user = userRepository.findById(req.userId())
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + req.userId()));
+
         if (memberRepository.existsByConversationIdAndUserId(convId, req.userId())) {
             throw new IllegalArgumentException("User is already a member of this conversation");
         }
+
         ConversationMember member = new ConversationMember();
         member.setConversationId(convId);
         member.setUserId(req.userId());
         member.setRole(MemberRole.MEMBER);
         memberRepository.save(member);
 
-        User user = userRepository.findById(req.userId())
-                .orElseThrow(() -> new IllegalArgumentException("User not found: " + req.userId()));
         return toMemberSummary(member, user);
     }
 
@@ -101,9 +107,13 @@ public class ConversationService {
         conv.setCreatedBy(currentUser.getId());
         conversationRepository.save(conv);
 
-        List<Long> allParticipants = new ArrayList<>(req.participantIds());
-        if (!allParticipants.contains(currentUser.getId())) {
-            allParticipants.add(0, currentUser.getId());
+        // Deduplicate participants while preserving order
+        List<Long> allParticipants = new ArrayList<>();
+        allParticipants.add(currentUser.getId());
+        for (Long userId : req.participantIds()) {
+            if (!allParticipants.contains(userId)) {
+                allParticipants.add(userId);
+            }
         }
 
         for (Long userId : allParticipants) {

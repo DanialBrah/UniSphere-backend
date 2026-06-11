@@ -29,6 +29,7 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
     @Query("""
             SELECT c FROM Conversation c
             WHERE c.convType = 'DIRECT'
+              AND :userId1 <> :userId2
               AND EXISTS (
                   SELECT 1 FROM ConversationMember cm1
                   WHERE cm1.conversationId = c.id AND cm1.userId = :userId1

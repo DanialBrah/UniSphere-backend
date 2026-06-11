@@ -1,10 +1,12 @@
 package com.unisphere.backend.social.messaging.dto.request;
 
 import com.unisphere.backend.social.messaging.enums.MessageType;
+import com.unisphere.backend.social.messaging.validation.ValidMessagePayload;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
+@ValidMessagePayload
 public record SendMessageRequest(
 
         @NotNull

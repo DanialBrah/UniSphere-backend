@@ -64,7 +64,19 @@ public class MessageService {
         message.setContent(req.content() != null ? req.content() : "");
         message.setMsgType(req.msgType() != null ? req.msgType() : MessageType.TEXT);
         message.setMediaUrl(req.mediaUrl());
-        message.setReplyToId(req.replyToId() != null && req.replyToId() > 0 ? req.replyToId() : null);
+
+        // Validate replyToId if provided
+        if (req.replyToId() != null && req.replyToId() > 0) {
+            Message replyToMessage = messageRepository.findById(req.replyToId())
+                    .orElseThrow(() -> new IllegalArgumentException("Reply target message not found: " + req.replyToId()));
+            if (!replyToMessage.getConversationId().equals(req.conversationId())) {
+                throw new IllegalArgumentException("Reply target message belongs to a different conversation");
+            }
+            message.setReplyToId(req.replyToId());
+        } else {
+            message.setReplyToId(null);
+        }
+
         messageRepository.save(message);
 
         MessageResponse response = toResponse(message);
@@ -85,7 +97,16 @@ public class MessageService {
         if (pageable.getPageNumber() == 0) {
             List<MessageResponse> cached = readFromCache(convId);
             if (!cached.isEmpty()) {
-                return new PageImpl<>(cached, pageable, cached.size());
+                // Apply pagination to cached results
+                int total = cached.size();
+                int pageSize = pageable.getPageSize();
+                int start = pageable.getPageNumber() * pageSize;
+                if (start >= total) {
+                    return new PageImpl<>(Collections.emptyList(), pageable, total);
+                }
+                int end = Math.min(start + pageSize, total);
+                List<MessageResponse> pageContent = cached.subList(start, end);
+                return new PageImpl<>(pageContent, pageable, total);
             }
         }
 
@@ -122,19 +143,26 @@ public class MessageService {
     public ReadReceiptEvent markRead(MarkReadRequest req, User currentUser) {
         assertMembership(req.conversationId(), currentUser.getId());
 
-        List<Message> unreadMessages = messageRepository
-                .findByConversationIdOrderByCreatedAtDesc(req.conversationId(), Pageable.unpaged())
-                .stream()
-                .filter(m -> m.getId() <= req.lastReadMessageId()
-                        && !m.getSenderId().equals(currentUser.getId())
-                        && !messageReadRepository.existsByMessageIdAndUserId(m.getId(), currentUser.getId()))
+        // Use bulk query to fetch unread messages
+        List<Message> unreadMessages = messageRepository.findUnreadMessagesForUser(
+                req.conversationId(),
+                req.lastReadMessageId(),
+                currentUser.getId()
+        );
+
+        // Bulk create MessageRead entities
+        List<MessageRead> messageReads = unreadMessages.stream()
+                .map(m -> {
+                    MessageRead read = new MessageRead();
+                    read.setMessageId(m.getId());
+                    read.setUserId(currentUser.getId());
+                    return read;
+                })
                 .toList();
 
-        for (Message m : unreadMessages) {
-            MessageRead read = new MessageRead();
-            read.setMessageId(m.getId());
-            read.setUserId(currentUser.getId());
-            messageReadRepository.save(read);
+        // Bulk save
+        if (!messageReads.isEmpty()) {
+            messageReadRepository.saveAll(messageReads);
         }
 
         ReadReceiptEvent event = new ReadReceiptEvent(
@@ -194,18 +222,23 @@ public class MessageService {
     private void notifyOtherMembers(Long convId, Long senderId, MessageResponse response) {
         memberRepository.findByConversationId(convId).stream()
                 .filter(m -> !m.getUserId().equals(senderId))
-                .forEach(m -> messagingTemplate.convertAndSendToUser(
-                        m.getUserId().toString(),
-                        "/queue/notifications",
-                        new java.util.HashMap<String, Object>() {{
-                            put("type", "MESSAGE");
-                            put("conversationId", convId);
-                            put("senderId", senderId);
-                            put("preview", response.content() != null && response.content().length() > 50
-                                    ? response.content().substring(0, 50) + "..."
-                                    : response.content());
-                        }}
-                ));
+                .forEach(m -> {
+                    // Get user's email for STOMP principal
+                    userRepository.findById(m.getUserId()).ifPresent(user -> {
+                        messagingTemplate.convertAndSendToUser(
+                                user.getEmail(),
+                                "/queue/notifications",
+                                new java.util.HashMap<String, Object>() {{
+                                    put("type", "MESSAGE");
+                                    put("conversationId", convId);
+                                    put("senderId", senderId);
+                                    put("preview", response.content() != null && response.content().length() > 50
+                                            ? response.content().substring(0, 50) + "..."
+                                            : response.content());
+                                }}
+                        );
+                    });
+                });
     }
 
     private void assertMembership(Long convId, Long userId) {

@@ -45,14 +45,14 @@ public class ChatbotService {
 
     public ChatResponse chat(ChatRequest req, User currentUser) {
         String normalised = req.message().trim().toLowerCase().replaceAll("\\s+", " ");
-        String cacheKey = CACHE_PREFIX + md5(normalised);
+        List<ChatTurn> history = loadSessionHistory(currentUser.getId());
+
+        String cacheKey = CACHE_PREFIX + md5(normalised + ":" + currentUser.getId());
 
         String cached = stringRedisTemplate.opsForValue().get(cacheKey);
         if (cached != null) {
             return new ChatResponse(cached, true, LocalDateTime.now());
         }
-
-        List<ChatTurn> history = loadSessionHistory(currentUser.getId());
 
         String reply = callGemini(normalised, history);
 
@@ -93,27 +93,29 @@ public class ChatbotService {
                 "generationConfig", Map.of("temperature", 0.7, "maxOutputTokens", 512)
         );
 
-        Map<?, ?> response = geminiRestClient.post()
-                .uri("/v1beta/models/{model}:generateContent?key={key}",
-                        geminiConfig.getModel(), geminiConfig.getApiKey())
-                .body(requestBody)
-                .retrieve()
-                .onStatus(HttpStatusCode::is4xxClientError, (request, resp) -> {
-                    throw new ChatbotException("Gemini API rejected request: " + resp.getStatusCode());
-                })
-                .onStatus(HttpStatusCode::is5xxServerError, (request, resp) -> {
-                    throw new ChatbotException("Gemini API unavailable: " + resp.getStatusCode());
-                })
-                .body(Map.class);
-
         try {
+            Map<?, ?> response = geminiRestClient.post()
+                    .uri("/v1beta/models/{model}:generateContent?key={key}",
+                            geminiConfig.getModel(), geminiConfig.getApiKey())
+                    .body(requestBody)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::is4xxClientError, (request, resp) -> {
+                        throw new ChatbotException("Gemini API rejected request: " + resp.getStatusCode());
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, (request, resp) -> {
+                        throw new ChatbotException("Gemini API unavailable: " + resp.getStatusCode());
+                    })
+                    .body(Map.class);
+
             List<?> candidates = (List<?>) response.get("candidates");
             Map<?, ?> content = (Map<?, ?>) ((Map<?, ?>) candidates.get(0)).get("content");
             List<?> parts = (List<?>) content.get("parts");
             return (String) ((Map<?, ?>) parts.get(0)).get("text");
+        } catch (ChatbotException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("Failed to parse Gemini response: {}", e.getMessage());
-            throw new ChatbotException("Failed to parse Gemini response");
+            log.error("Gemini API call failed: {}", e.getMessage(), e);
+            throw new ChatbotException("Failed to communicate with Gemini API: " + e.getMessage(), e);
         }
     }
 

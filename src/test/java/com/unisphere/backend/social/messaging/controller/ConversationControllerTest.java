@@ -46,7 +46,7 @@ class ConversationControllerTest extends AbstractMessagingIntegrationTest {
         Long firstId = createDirectConversation(tokenA, userBId);
         Long secondId = createDirectConversation(tokenA, userBId);
 
-        assert firstId.equals(secondId) : "Expected same conversation ID on duplicate direct conv creation";
+        org.junit.jupiter.api.Assertions.assertEquals(firstId, secondId, "Expected same conversation ID on duplicate direct conv creation");
     }
 
     @Test
@@ -148,7 +148,7 @@ class ConversationControllerTest extends AbstractMessagingIntegrationTest {
 
         mockMvc.perform(get(BASE + "/999999")
                         .header("Authorization", "Bearer " + token))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isNotFound());
     }
 
     // ── Add member ────────────────────────────────────────────────────────────

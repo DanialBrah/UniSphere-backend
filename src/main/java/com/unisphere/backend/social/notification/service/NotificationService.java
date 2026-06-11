@@ -42,11 +42,8 @@ public class NotificationService {
     }
 
     public void markRead(Long notificationId, User currentUser) {
-        Notification notif = notificationRepository.findById(notificationId)
+        Notification notif = notificationRepository.findByIdAndUserId(notificationId, currentUser.getId())
                 .orElseThrow(() -> new IllegalArgumentException("Notification not found: " + notificationId));
-        if (!notif.getUserId().equals(currentUser.getId())) {
-            throw new UnauthorizedActionException("Cannot mark another user's notification as read");
-        }
         notif.setRead(true);
         notificationRepository.save(notif);
     }
