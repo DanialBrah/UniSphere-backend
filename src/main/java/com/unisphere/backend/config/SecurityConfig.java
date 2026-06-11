@@ -45,7 +45,9 @@ public class SecurityConfig {
             "/api/health",
             "/swagger-ui/**",
             "/swagger-ui.html",
-            "/v3/api-docs/**"
+            "/v3/api-docs/**",
+            // WebSocket handshake — JWT is validated inside JwtChannelInterceptor on STOMP CONNECT
+            "/ws/**"
     };
 
     @Bean

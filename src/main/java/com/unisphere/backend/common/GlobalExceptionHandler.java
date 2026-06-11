@@ -73,6 +73,31 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error("MEDIA_UPLOAD_FAILED", ex.getMessage()));
     }
 
+    @ExceptionHandler(ConversationNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConversationNotFound(ConversationNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error("CONVERSATION_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(MessageNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMessageNotFound(MessageNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error("MESSAGE_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(NotConversationMemberException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotConversationMember(NotConversationMemberException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error("NOT_CONVERSATION_MEMBER", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ChatbotException.class)
+    public ResponseEntity<ApiResponse<Void>> handleChatbot(ChatbotException ex) {
+        log.error("Chatbot error: {}", ex.getMessage(), ex);
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.error("CHATBOT_ERROR", ex.getMessage()));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)

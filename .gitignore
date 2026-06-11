@@ -34,3 +34,4 @@ build/
 .env
 CLAUDE.md
 /miscellaneous
+*.log

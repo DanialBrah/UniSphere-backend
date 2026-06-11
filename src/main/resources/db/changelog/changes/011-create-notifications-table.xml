@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         notifications
+         actor_id is nullable — some events have no human actor (e.g. VERIFICATION).
+         No deleted_at — notifications are marked read, never soft-deleted.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="011-01" author="system">
+        <createTable tableName="notifications">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_notif_user"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="actor_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"
+                             foreignKeyName="fk_notif_actor"
+                             references="users(id)"/>
+            </column>
+            <column name="notif_type" type="ENUM('LIKE','COMMENT','FOLLOW','MENTION','EVENT','JOB','MESSAGE','ORDER','SERVICE_ORDER','CLUB_INVITE','PROJECT_INVITE','MATCH','STUDY_SESSION','LOST_FOUND_CLAIM','VERIFICATION')">
+                <constraints nullable="false"/>
+            </column>
+            <column name="target_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"/>
+            </column>
+            <column name="target_type" type="VARCHAR(50)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="is_read" type="TINYINT(1)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <!-- Composite index: fast unread badge count + paginated inbox per user -->
+        <createIndex tableName="notifications" indexName="idx_notif_user_read_created">
+            <column name="user_id"/>
+            <column name="is_read"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="notifications" indexName="idx_notif_actor">
+            <column name="actor_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>
