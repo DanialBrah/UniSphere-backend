@@ -86,6 +86,20 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.toggleSave(postId, currentUser)));
     }
 
+    @GetMapping("/liked")
+    public ResponseEntity<ApiResponse<Page<PostResponse>>> getLikedPosts(
+            @PageableDefault(size = 20) Pageable pageable,
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.getLikedPosts(pageable, currentUser)));
+    }
+
+    @GetMapping("/saved")
+    public ResponseEntity<ApiResponse<Page<PostResponse>>> getSavedPosts(
+            @PageableDefault(size = 20) Pageable pageable,
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.getSavedPosts(pageable, currentUser)));
+    }
+
     @GetMapping("/search")
     public ResponseEntity<ApiResponse<Page<PostResponse>>> search(
             @RequestParam String q,

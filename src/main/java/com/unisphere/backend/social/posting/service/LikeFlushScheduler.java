@@ -39,9 +39,10 @@ public class LikeFlushScheduler {
             Long delta = null;
             try {
                 delta = redisTemplate.opsForValue().getAndSet(key, 0L);
-                if (delta == null || delta == 0) continue;
+                if (delta == null || delta == 0) { redisTemplate.delete(key); continue; }
                 Long postId = Long.parseLong(key.substring("post:likes:".length()));
                 postRepository.incrementLikesCount(postId, delta);
+                redisTemplate.delete(key);
             } catch (Exception ex) {
                 log.warn("Failed to flush post likes for key {}: {}", key, ex.getMessage());
                 restoreDelta(key, delta);
@@ -54,9 +55,10 @@ public class LikeFlushScheduler {
             Long delta = null;
             try {
                 delta = redisTemplate.opsForValue().getAndSet(key, 0L);
-                if (delta == null || delta == 0) continue;
+                if (delta == null || delta == 0) { redisTemplate.delete(key); continue; }
                 Long postId = Long.parseLong(key.substring("post:views:".length()));
                 postRepository.incrementViewsCount(postId, delta);
+                redisTemplate.delete(key);
             } catch (Exception ex) {
                 log.warn("Failed to flush post views for key {}: {}", key, ex.getMessage());
                 restoreDelta(key, delta);
@@ -69,9 +71,10 @@ public class LikeFlushScheduler {
             Long delta = null;
             try {
                 delta = redisTemplate.opsForValue().getAndSet(key, 0L);
-                if (delta == null || delta == 0) continue;
+                if (delta == null || delta == 0) { redisTemplate.delete(key); continue; }
                 Long commentId = Long.parseLong(key.substring("comment:likes:".length()));
                 commentRepository.incrementLikesCount(commentId, delta);
+                redisTemplate.delete(key);
             } catch (Exception ex) {
                 log.warn("Failed to flush comment likes for key {}: {}", key, ex.getMessage());
                 restoreDelta(key, delta);

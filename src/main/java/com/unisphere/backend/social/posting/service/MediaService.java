@@ -104,9 +104,37 @@ public class MediaService {
         return new MediaUploadResponse(mediaKey, mediaUrl, mediaType);
     }
 
+    public MediaPresignResponse presignAvatarUpload(MediaPresignRequest request, User currentUser) {
+        String ext = extractExtension(request.filename());
+        if (!ALLOWED_EXTENSIONS.contains(ext)) {
+            throw new IllegalArgumentException("File type not allowed: " + ext);
+        }
+
+        String bucket   = b2Config.getBucket().getPosts();
+        String mediaKey = "avatars/" + currentUser.getId() + "/" + UUID.randomUUID() + "." + ext;
+
+        try {
+            PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
+                    .signatureDuration(Duration.ofMinutes(b2Config.getPresignExpiryMinutes()))
+                    .putObjectRequest(b -> b
+                            .bucket(bucket)
+                            .key(mediaKey)
+                            .contentType(request.contentType())
+                    )
+                    .build();
+
+            PresignedPutObjectRequest presigned = s3Presigner.presignPutObject(presignRequest);
+            return new MediaPresignResponse(presigned.url().toString(), mediaKey);
+        } catch (Exception ex) {
+            throw new MediaUploadException("Could not generate presigned URL for avatar", ex);
+        }
+    }
+
     public void deleteMedia(String mediaKey, User currentUser) {
-        String expectedPrefix = "posts/" + currentUser.getId() + "/";
-        if (!mediaKey.startsWith(expectedPrefix)) {
+        Long userId = currentUser.getId();
+        boolean owned = mediaKey.startsWith("posts/"   + userId + "/")
+                     || mediaKey.startsWith("avatars/" + userId + "/");
+        if (!owned) {
             throw new UnauthorizedActionException("Cannot delete media that does not belong to you");
         }
 

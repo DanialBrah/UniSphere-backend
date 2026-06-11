@@ -37,4 +37,12 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     @Transactional
     @Query("UPDATE Post p SET p.viewsCount = p.viewsCount + :delta WHERE p.id = :id")
     void incrementViewsCount(@Param("id") Long id, @Param("delta") long delta);
+
+    @Query(value      = "SELECT p FROM Post p, PostLike pl WHERE pl.postId = p.id AND pl.userId = :userId ORDER BY pl.createdAt DESC",
+           countQuery = "SELECT COUNT(p) FROM Post p, PostLike pl WHERE pl.postId = p.id AND pl.userId = :userId")
+    Page<Post> findLikedPostsByUserId(@Param("userId") Long userId, Pageable pageable);
+
+    @Query(value      = "SELECT p FROM Post p, PostSave ps WHERE ps.postId = p.id AND ps.userId = :userId ORDER BY ps.savedAt DESC",
+           countQuery = "SELECT COUNT(p) FROM Post p, PostSave ps WHERE ps.postId = p.id AND ps.userId = :userId")
+    Page<Post> findSavedPostsByUserId(@Param("userId") Long userId, Pageable pageable);
 }
