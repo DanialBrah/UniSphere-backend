@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         conversations
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="010-01" author="system">
+        <createTable tableName="conversations">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="conv_type" type="ENUM('DIRECT','GROUP')" defaultValue="DIRECT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(255)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_by" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_conv_creator" references="users(id)"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+        <createIndex tableName="conversations" indexName="idx_conv_created_by">
+            <column name="created_by"/>
+        </createIndex>
+        <createIndex tableName="conversations" indexName="idx_conv_created_at">
+            <column name="created_at" descending="true"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         conversation_members
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="010-02" author="system">
+        <createTable tableName="conversation_members">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="conversation_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_convmember_conv"
+                             references="conversations(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_convmember_user"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="role" type="ENUM('ADMIN','MEMBER')" defaultValue="MEMBER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="joined_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="conversation_members"
+                             columnNames="conversation_id, user_id"
+                             constraintName="uq_conv_member"/>
+        <createIndex tableName="conversation_members" indexName="idx_convmember_user_id">
+            <column name="user_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         messages
+         reply_to_id is a self-referencing FK added after table creation
+         to avoid circular dependency in a single createTable block.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="010-03" author="system">
+        <createTable tableName="messages">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="conversation_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_msg_conv"
+                             references="conversations(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="sender_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_msg_sender"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="content" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="msg_type" type="ENUM('TEXT','IMAGE','FILE','SYSTEM')" defaultValue="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="media_url" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="reply_to_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="messages"
+                                 baseColumnNames="reply_to_id"
+                                 referencedTableName="messages"
+                                 referencedColumnNames="id"
+                                 constraintName="fk_msg_reply"
+                                 onDelete="SET NULL"/>
+        <createIndex tableName="messages" indexName="idx_msg_conv_created">
+            <column name="conversation_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="messages" indexName="idx_msg_sender">
+            <column name="sender_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         message_reads
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="010-04" author="system">
+        <createTable tableName="message_reads">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="message_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_msgread_msg"
+                             references="messages(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_msgread_user"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="read_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="message_reads"
+                             columnNames="message_id, user_id"
+                             constraintName="uq_message_read"/>
+        <createIndex tableName="message_reads" indexName="idx_msgread_user_id">
+            <column name="user_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>
