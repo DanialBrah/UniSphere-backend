@@ -1,5 +1,7 @@
 package com.unisphere.backend.identity.dto;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 
 public record UpdateProfileRequest(
@@ -16,7 +18,7 @@ public record UpdateProfileRequest(
         // ── Student ─────────────────────────────────────────────────────────
         String  faculty,
         String  program,
-        Integer yearOfStudy,
+        @Min(1) @Max(10) Integer yearOfStudy,
 
         // ── Alumni ──────────────────────────────────────────────────────────
         String currentCompany,

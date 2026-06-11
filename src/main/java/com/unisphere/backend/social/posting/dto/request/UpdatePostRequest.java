@@ -1,6 +1,8 @@
 package com.unisphere.backend.social.posting.dto.request;
 
 import com.unisphere.backend.social.posting.enums.PostVisibility;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 
@@ -14,8 +16,8 @@ public record UpdatePostRequest(
 
         PostVisibility visibility,
 
-        List<MediaItem> addMedia,
-        List<Long>      removeMediaIds
+        List<@Valid MediaItem> addMedia,
+        List<Long>            removeMediaIds
 ) {
-    public record MediaItem(String mediaKey, String mediaType) {}
+    public record MediaItem(@NotBlank String mediaKey, @NotBlank String mediaType) {}
 }

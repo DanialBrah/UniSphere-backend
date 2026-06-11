@@ -38,6 +38,14 @@ class UserControllerTest extends AbstractIntegrationTest {
                 .at("/data/accessToken").asText();
     }
 
+    private Long getUserId(String token) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/me")
+                        .header("Authorization", "Bearer " + token))
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString())
+                .at("/data/id").asLong();
+    }
+
     // ── Update profile ────────────────────────────────────────────────────────
 
     @Test
@@ -76,8 +84,9 @@ class UserControllerTest extends AbstractIntegrationTest {
     @Test
     void updateProfile_setAvatar_returnsNewAvatarUrl() throws Exception {
         String token = registerAndGetToken("profile.avatar@test.com", "USR1002");
+        Long userId = getUserId(token);
 
-        String avatarKey = "avatars/1/test-avatar.jpg";
+        String avatarKey = "avatars/" + userId + "/test-avatar.jpg";
         UpdateProfileRequest req = new UpdateProfileRequest(
                 avatarKey, null, null, null, null, null,
                 null, null, null, null, null, null, null, null,
@@ -95,17 +104,20 @@ class UserControllerTest extends AbstractIntegrationTest {
     @Test
     void updateProfile_removeAvatar_setsAvatarUrlToNull() throws Exception {
         String token = registerAndGetToken("profile.removeavatar@test.com", "USR1003");
+        Long userId = getUserId(token);
 
         // First set an avatar
         UpdateProfileRequest setReq = new UpdateProfileRequest(
-                "avatars/1/avatar.jpg", null, null, null, null, null,
+                "avatars/" + userId + "/avatar.jpg", null, null, null, null, null,
                 null, null, null, null, null, null, null, null,
                 null, null, null, null, null
         );
         mockMvc.perform(put(BASE + "/me")
-                .contentType(MediaType.APPLICATION_JSON)
-                .header("Authorization", "Bearer " + token)
-                .content(objectMapper.writeValueAsString(setReq)));
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
+                        .content(objectMapper.writeValueAsString(setReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.avatarUrl").value("avatars/" + userId + "/avatar.jpg"));
 
         // Now remove it with empty string sentinel
         UpdateProfileRequest removeReq = new UpdateProfileRequest(

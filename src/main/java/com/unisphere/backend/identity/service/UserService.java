@@ -1,5 +1,6 @@
 package com.unisphere.backend.identity.service;
 
+import com.unisphere.backend.common.exception.UnauthorizedActionException;
 import com.unisphere.backend.identity.dto.*;
 import com.unisphere.backend.identity.entity.*;
 import com.unisphere.backend.identity.mapper.UserMapper;
@@ -21,6 +22,9 @@ public class UserService {
 
         if (req.avatarUrl() != null) {
             String newAvatar = req.avatarUrl().isBlank() ? null : req.avatarUrl();
+            if (newAvatar != null && !newAvatar.startsWith("avatars/" + currentUser.getId() + "/")) {
+                throw new UnauthorizedActionException("Avatar key does not belong to the current user");
+            }
             currentUser.setAvatarUrl(newAvatar);
             syncRoleAvatar(currentUser, newAvatar);
         }

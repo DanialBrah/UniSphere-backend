@@ -2,6 +2,8 @@ package com.unisphere.backend.social.posting.dto.request;
 
 import com.unisphere.backend.social.posting.enums.PostType;
 import com.unisphere.backend.social.posting.enums.PostVisibility;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
@@ -23,7 +25,7 @@ public record CreatePostRequest(
         List<Long> taggedUserIds,
 
         @Size(max = 10, message = "A post may have at most 10 media files")
-        List<MediaItem> media
+        List<@Valid MediaItem> media
 ) {
-    public record MediaItem(String mediaKey, String mediaType) {}
+    public record MediaItem(@NotBlank String mediaKey, @NotBlank String mediaType) {}
 }
