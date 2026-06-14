@@ -69,7 +69,25 @@ public class ConversationService {
         return toResponse(conv, currentUser.getId());
     }
 
+    @Transactional(readOnly = true)
+    public List<MemberSummary> getMembers(Long convId, User currentUser) {
+        conversationRepository.findById(convId)
+                .orElseThrow(() -> new ConversationNotFoundException(convId));
+        assertMembership(convId, currentUser.getId());
+        return memberRepository.findByConversationId(convId).stream()
+                .map(m -> {
+                    User u = userRepository.findById(m.getUserId()).orElse(null);
+                    return toMemberSummary(m, u);
+                })
+                .toList();
+    }
+
     public MemberSummary addMember(Long convId, AddMemberRequest req, User currentUser) {
+        Conversation conv = conversationRepository.findById(convId)
+                .orElseThrow(() -> new ConversationNotFoundException(convId));
+        if (conv.getConvType() == ConversationType.DIRECT) {
+            throw new IllegalArgumentException("Cannot add members to a direct conversation");
+        }
         assertAdmin(convId, currentUser.getId());
 
         User user = userRepository.findById(req.userId())
@@ -88,6 +106,21 @@ public class ConversationService {
         return toMemberSummary(member, user);
     }
 
+    public MemberSummary promoteMember(Long convId, Long targetUserId, User currentUser) {
+        conversationRepository.findById(convId)
+                .orElseThrow(() -> new ConversationNotFoundException(convId));
+        assertAdmin(convId, currentUser.getId());
+        ConversationMember member = memberRepository.findByConversationIdAndUserId(convId, targetUserId)
+                .orElseThrow(() -> new IllegalArgumentException("User " + targetUserId + " is not a member of this conversation"));
+        if (member.getRole() == MemberRole.ADMIN) {
+            throw new IllegalArgumentException("User is already an admin");
+        }
+        member.setRole(MemberRole.ADMIN);
+        memberRepository.save(member);
+        User user = userRepository.findById(targetUserId).orElse(null);
+        return toMemberSummary(member, user);
+    }
+
     public void removeMember(Long convId, Long targetUserId, User currentUser) {
         boolean isSelf = currentUser.getId().equals(targetUserId);
         if (!isSelf) {
@@ -96,6 +129,18 @@ public class ConversationService {
             assertMembership(convId, currentUser.getId());
         }
         memberRepository.deleteByConversationIdAndUserId(convId, targetUserId);
+    }
+
+    public void deleteConversation(Long convId, User currentUser) {
+        Conversation conv = conversationRepository.findById(convId)
+                .orElseThrow(() -> new ConversationNotFoundException(convId));
+        if (conv.getConvType() == ConversationType.DIRECT) {
+            assertMembership(convId, currentUser.getId());
+        } else {
+            assertAdmin(convId, currentUser.getId());
+        }
+        conv.setDeletedAt(java.time.LocalDateTime.now());
+        conversationRepository.save(conv);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

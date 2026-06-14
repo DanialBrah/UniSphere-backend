@@ -14,6 +14,8 @@ import com.unisphere.backend.social.posting.dto.response.PostAuthorResponse;
 import com.unisphere.backend.social.posting.entity.Comment;
 import com.unisphere.backend.social.posting.entity.CommentLike;
 import com.unisphere.backend.social.posting.mapper.CommentMapper;
+import com.unisphere.backend.social.notification.enums.NotificationType;
+import com.unisphere.backend.social.notification.service.NotificationService;
 import com.unisphere.backend.social.posting.repository.CommentLikeRepository;
 import com.unisphere.backend.social.posting.repository.CommentRepository;
 import com.unisphere.backend.social.posting.repository.PostRepository;
@@ -41,9 +43,10 @@ public class CommentService {
     private final UserRepository userRepository;
     private final CommentMapper commentMapper;
     private final RedisTemplate<String, Long> redisTemplate;
+    private final NotificationService notificationService;
 
     public CommentResponse createComment(Long postId, CreateCommentRequest req, User currentUser) {
-        postRepository.findActiveById(postId)
+        var post = postRepository.findActiveById(postId)
                 .orElseThrow(() -> new PostNotFoundException(postId));
 
         Comment comment = new Comment();
@@ -53,6 +56,19 @@ public class CommentService {
         comment.setParentCommentId(req.parentCommentId());
 
         commentRepository.save(comment);
+
+        // Notify the post owner about the new comment
+        notificationService.createAndPush(post.getUserId(), currentUser.getId(), NotificationType.COMMENT, postId, "POST");
+
+        // If this is a reply, also notify the parent comment's author
+        if (req.parentCommentId() != null) {
+            commentRepository.findById(req.parentCommentId()).ifPresent(parent -> {
+                if (parent.getPostId().equals(postId) && !parent.getUserId().equals(post.getUserId())) {
+                    notificationService.createAndPush(parent.getUserId(), currentUser.getId(), NotificationType.COMMENT, postId, "POST");
+                }
+            });
+        }
+
         return toCommentResponse(comment, currentUser);
     }
 

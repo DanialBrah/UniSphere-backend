@@ -146,8 +146,9 @@ public class ChatbotService {
         try {
             String key = SESSION_PREFIX + userId;
             int maxEntries = geminiConfig.getMaxHistoryTurns() * 2;
-            String userJson = objectMapper.writeValueAsString(new ChatTurn("user", userMessage));
-            String modelJson = objectMapper.writeValueAsString(new ChatTurn("model", modelReply));
+            LocalDateTime now = LocalDateTime.now();
+            String userJson = objectMapper.writeValueAsString(new ChatTurn("user", userMessage, now));
+            String modelJson = objectMapper.writeValueAsString(new ChatTurn("model", modelReply, now));
             stringRedisTemplate.opsForList().rightPush(key, userJson);
             stringRedisTemplate.opsForList().rightPush(key, modelJson);
             stringRedisTemplate.opsForList().trim(key, -maxEntries, -1);

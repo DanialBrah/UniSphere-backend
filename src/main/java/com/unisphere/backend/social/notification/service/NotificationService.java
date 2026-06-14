@@ -2,15 +2,21 @@ package com.unisphere.backend.social.notification.service;
 
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
 import com.unisphere.backend.identity.entity.User;
+import com.unisphere.backend.identity.repository.UserRepository;
 import com.unisphere.backend.social.notification.dto.response.NotificationResponse;
 import com.unisphere.backend.social.notification.entity.Notification;
 import com.unisphere.backend.social.notification.enums.NotificationType;
 import com.unisphere.backend.social.notification.repository.NotificationRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.transaction.event.TransactionPhase;
 
 @Service
 @Transactional
@@ -18,7 +24,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
+    private final UserRepository userRepository;
+    private final SimpMessagingTemplate messagingTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
+    record NotificationCreatedEvent(Long notificationId, Long userId) {}
+
+    // Persist only — use when no real-time push is needed
     public Notification create(Long userId, Long actorId, NotificationType type, Long targetId, String targetType) {
         Notification notif = new Notification();
         notif.setUserId(userId);
@@ -29,7 +41,28 @@ public class NotificationService {
         return notificationRepository.save(notif);
     }
 
-    @Transactional(readOnly = true)
+    // Persist + push via WebSocket — use for real-time events
+    public void createAndPush(Long userId, Long actorId, NotificationType type, Long targetId, String targetType) {
+        if (userId.equals(actorId)) return;
+        Notification notif = create(userId, actorId, type, targetId, targetType);
+        eventPublisher.publishEvent(new NotificationCreatedEvent(notif.getId(), userId));
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void handleNotificationCreated(NotificationCreatedEvent event) {
+        notificationRepository.findById(event.notificationId()).ifPresent(notif ->
+                userRepository.findById(event.userId()).ifPresent(user ->
+                        messagingTemplate.convertAndSendToUser(
+                                user.getEmail(),
+                                "/queue/notifications",
+                                toResponse(notif)
+                        )
+                )
+        );
+    }
+
+@Transactional(readOnly = true)
     public Page<NotificationResponse> getNotifications(User currentUser, Pageable pageable) {
         return notificationRepository
                 .findByUserIdOrderByCreatedAtDesc(currentUser.getId(), pageable)
@@ -52,7 +85,7 @@ public class NotificationService {
         notificationRepository.markAllReadByUserId(currentUser.getId());
     }
 
-    private NotificationResponse toResponse(Notification n) {
+    NotificationResponse toResponse(Notification n) {
         return new NotificationResponse(
                 n.getId(), n.getActorId(), n.getNotifType(),
                 n.getTargetId(), n.getTargetType(), n.isRead(), n.getCreatedAt()

@@ -85,8 +85,6 @@ public class MessageService {
 
         messagingTemplate.convertAndSend("/topic/conversation/" + req.conversationId(), response);
 
-        notifyOtherMembers(req.conversationId(), currentUser.getId(), response);
-
         return response;
     }
 
@@ -94,19 +92,20 @@ public class MessageService {
     public Page<MessageResponse> getHistory(Long convId, User currentUser, Pageable pageable) {
         assertMembership(convId, currentUser.getId());
 
-        if (pageable.getPageNumber() == 0) {
-            List<MessageResponse> cached = readFromCache(convId);
-            if (!cached.isEmpty()) {
-                // Apply pagination to cached results
-                int total = cached.size();
-                int pageSize = pageable.getPageSize();
-                int start = pageable.getPageNumber() * pageSize;
-                if (start >= total) {
-                    return new PageImpl<>(Collections.emptyList(), pageable, total);
-                }
-                int end = Math.min(start + pageSize, total);
-                List<MessageResponse> pageContent = cached.subList(start, end);
-                return new PageImpl<>(pageContent, pageable, total);
+        List<MessageResponse> cached = readFromCache(convId);
+        // Only use cache when fully populated so page boundaries align with DB sequence
+        if (cached.size() == historyMaxMessages) {
+            // Sort cached list in descending order by createdAt to match DB ordering
+            cached = cached.stream()
+                    .sorted((a, b) -> b.createdAt().compareTo(a.createdAt()))
+                    .toList();
+            int pageSize = pageable.getPageSize();
+            long startLong = (long) pageable.getPageNumber() * pageSize;
+            if (startLong >= 0 && startLong < historyMaxMessages) {
+                int start = (int) startLong;
+                int end = Math.min(start + pageSize, (int) historyMaxMessages);
+                long dbTotal = messageRepository.countByConversationId(convId);
+                return new PageImpl<>(cached.subList(start, end), pageable, dbTotal);
             }
         }
 
@@ -218,28 +217,6 @@ public class MessageService {
     }
 
     // ── Other helpers ─────────────────────────────────────────────────────────
-
-    private void notifyOtherMembers(Long convId, Long senderId, MessageResponse response) {
-        memberRepository.findByConversationId(convId).stream()
-                .filter(m -> !m.getUserId().equals(senderId))
-                .forEach(m -> {
-                    // Get user's email for STOMP principal
-                    userRepository.findById(m.getUserId()).ifPresent(user -> {
-                        messagingTemplate.convertAndSendToUser(
-                                user.getEmail(),
-                                "/queue/notifications",
-                                new java.util.HashMap<String, Object>() {{
-                                    put("type", "MESSAGE");
-                                    put("conversationId", convId);
-                                    put("senderId", senderId);
-                                    put("preview", response.content() != null && response.content().length() > 50
-                                            ? response.content().substring(0, 50) + "..."
-                                            : response.content());
-                                }}
-                        );
-                    });
-                });
-    }
 
     private void assertMembership(Long convId, Long userId) {
         if (!memberRepository.existsByConversationIdAndUserId(convId, userId)) {

@@ -13,6 +13,8 @@ import com.unisphere.backend.social.posting.enums.MediaType;
 import com.unisphere.backend.social.posting.enums.PostType;
 import com.unisphere.backend.social.posting.enums.PostVisibility;
 import com.unisphere.backend.social.posting.mapper.PostMapper;
+import com.unisphere.backend.social.notification.enums.NotificationType;
+import com.unisphere.backend.social.notification.service.NotificationService;
 import com.unisphere.backend.social.posting.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -39,6 +41,7 @@ public class PostService {
     private final UserRepository userRepository;
     private final PostMapper postMapper;
     private final RedisTemplate<String, Long> redisTemplate;
+    private final NotificationService notificationService;
 
     public PostResponse createPost(CreatePostRequest req, User currentUser) {
         Post post = new Post();
@@ -71,6 +74,13 @@ public class PostService {
         }
 
         postRepository.save(post);
+
+        if (req.taggedUserIds() != null) {
+            for (Long taggedId : req.taggedUserIds()) {
+                notificationService.createAndPush(taggedId, currentUser.getId(), NotificationType.MENTION, post.getId(), "POST");
+            }
+        }
+
         return toPostResponse(post, currentUser);
     }
 
@@ -133,7 +143,7 @@ public class PostService {
     }
 
     public LikeToggleResponse toggleLike(Long postId, User currentUser) {
-        findActivePost(postId);
+        Post post = findActivePost(postId);
         Long userId = currentUser.getId();
 
         if (postLikeRepository.existsByPostIdAndUserId(postId, userId)) {
@@ -143,6 +153,7 @@ public class PostService {
         } else {
             postLikeRepository.save(new PostLike(postId, userId));
             redisIncrement(REDIS_POST_LIKES + postId, 1);
+            notificationService.createAndPush(post.getUserId(), userId, NotificationType.LIKE, postId, "POST");
             return new LikeToggleResponse(true, postLikeRepository.countByPostId(postId));
         }
     }
