@@ -47,6 +47,13 @@ public class ConversationController {
         return ResponseEntity.ok(ApiResponse.ok(conversationService.getConversation(convId, currentUser)));
     }
 
+    @GetMapping("/{convId}/members")
+    public ResponseEntity<ApiResponse<java.util.List<MemberSummary>>> getMembers(
+            @PathVariable Long convId,
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(ApiResponse.ok(conversationService.getMembers(convId, currentUser)));
+    }
+
     @PostMapping("/{convId}/members")
     public ResponseEntity<ApiResponse<MemberSummary>> addMember(
             @PathVariable Long convId,
@@ -54,6 +61,23 @@ public class ConversationController {
             @AuthenticationPrincipal User currentUser) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok(conversationService.addMember(convId, req, currentUser), "Member added"));
+    }
+
+    @DeleteMapping("/{convId}")
+    public ResponseEntity<ApiResponse<Void>> deleteConversation(
+            @PathVariable Long convId,
+            @AuthenticationPrincipal User currentUser) {
+        conversationService.deleteConversation(convId, currentUser);
+        return ResponseEntity.ok(ApiResponse.ok(null, "Conversation deleted"));
+    }
+
+    @PutMapping("/{convId}/members/{userId}/promote")
+    public ResponseEntity<ApiResponse<MemberSummary>> promoteMember(
+            @PathVariable Long convId,
+            @PathVariable Long userId,
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                conversationService.promoteMember(convId, userId, currentUser), "Member promoted to admin"));
     }
 
     @DeleteMapping("/{convId}/members/{userId}")

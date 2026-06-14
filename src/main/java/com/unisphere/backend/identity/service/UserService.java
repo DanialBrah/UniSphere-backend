@@ -1,13 +1,20 @@
 package com.unisphere.backend.identity.service;
 
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
+import com.unisphere.backend.common.exception.UserNotFoundException;
 import com.unisphere.backend.identity.dto.*;
 import com.unisphere.backend.identity.entity.*;
 import com.unisphere.backend.identity.mapper.UserMapper;
 import com.unisphere.backend.identity.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional
@@ -16,6 +23,39 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final UserMapper userMapper;
+
+    // ── Read ─────────────────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public UserProfileResponse getMe(User currentUser) {
+        return toProfile(currentUser);
+    }
+
+    @Transactional(readOnly = true)
+    public UserProfileResponse getUserById(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("User not found: " + id));
+        return toProfile(user);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<UserSummaryResponse> searchUsers(String q, User currentUser, Pageable pageable) {
+        Page<Long> ids = userRepository.searchIds(q.trim(), currentUser.getId(), pageable);
+        Map<Long, User> byId = userRepository.findAllById(ids.getContent())
+                .stream().collect(Collectors.toMap(User::getId, u -> u));
+        return ids.map(id -> toSummary(byId.get(id)));
+    }
+
+    // Admin: list all users with optional role / status filters
+    @Transactional(readOnly = true)
+    public Page<UserProfileResponse> listUsers(String role, String status, Pageable pageable) {
+        Page<Long> ids = userRepository.listIds(role, status, pageable);
+        Map<Long, User> byId = userRepository.findAllById(ids.getContent())
+                .stream().collect(Collectors.toMap(User::getId, u -> u));
+        return ids.map(id -> toProfile(byId.get(id)));
+    }
+
+    // ── Update ───────────────────────────────────────────────────────────────
 
     public UserProfileResponse updateProfile(User currentUser, UpdateProfileRequest req) {
         if (req.phone() != null) currentUser.setPhone(req.phone());
@@ -64,11 +104,31 @@ public class UserService {
         return toProfile(currentUser);
     }
 
-    private void syncRoleAvatar(User user, String url) {
-        if (user instanceof Employer e) e.setCompanyLogoUrl(url);
-        else if (user instanceof University u) u.setLogoUrl(url);
-        else if (user instanceof Club c) c.setLogoUrl(url);
+    // Admin: update any user's status
+    public UserProfileResponse adminUpdateStatus(Long id, UserStatusUpdateRequest req) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("User not found: " + id));
+        user.setStatus(req.status());
+        userRepository.save(user);
+        return toProfile(user);
     }
+
+    // ── Delete ───────────────────────────────────────────────────────────────
+
+    public void deleteMe(User currentUser) {
+        currentUser.setDeletedAt(LocalDateTime.now());
+        userRepository.save(currentUser);
+    }
+
+    // Admin: soft-delete any user
+    public void adminDeleteUser(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("User not found: " + id));
+        user.setDeletedAt(LocalDateTime.now());
+        userRepository.save(user);
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
     UserProfileResponse toProfile(User user) {
         return switch (user.getRole()) {
@@ -79,5 +139,32 @@ public class UserService {
             case CLUB       -> userMapper.toClubProfile(user, (Club) user);
             case ADMIN      -> userMapper.toAdminProfile(user, (Admin) user);
         };
+    }
+
+    private UserSummaryResponse toSummary(User user) {
+        if (user == null) return null;
+        return new UserSummaryResponse(
+                user.getId(),
+                resolveDisplayName(user),
+                user.getEmail(),
+                user.getRole().name(),
+                user.getAvatarUrl()
+        );
+    }
+
+    private void syncRoleAvatar(User user, String url) {
+        if (user instanceof Employer e) e.setCompanyLogoUrl(url);
+        else if (user instanceof University u) u.setLogoUrl(url);
+        else if (user instanceof Club c) c.setLogoUrl(url);
+    }
+
+    static String resolveDisplayName(User user) {
+        if (user instanceof Student s)    return s.getFullName();
+        if (user instanceof Alumni a)     return a.getFullName();
+        if (user instanceof Admin a)      return a.getFullName();
+        if (user instanceof Employer e)   return e.getCompanyName();
+        if (user instanceof University u) return u.getName();
+        if (user instanceof Club c)       return c.getName();
+        return user.getEmail();
     }
 }
