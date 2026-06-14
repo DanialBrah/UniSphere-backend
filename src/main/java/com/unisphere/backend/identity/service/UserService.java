@@ -108,6 +108,9 @@ public class UserService {
     public UserProfileResponse adminUpdateStatus(Long id, UserStatusUpdateRequest req) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new UserNotFoundException("User not found: " + id));
+        if (user.getDeletedAt() != null) {
+            throw new UserNotFoundException("User not found: " + id);
+        }
         user.setStatus(req.status());
         userRepository.save(user);
         return toProfile(user);
@@ -131,6 +134,7 @@ public class UserService {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     UserProfileResponse toProfile(User user) {
+        if (user == null) return null;
         return switch (user.getRole()) {
             case STUDENT    -> userMapper.toStudentProfile(user, (Student) user);
             case ALUMNI     -> userMapper.toAlumniProfile(user, (Alumni) user);

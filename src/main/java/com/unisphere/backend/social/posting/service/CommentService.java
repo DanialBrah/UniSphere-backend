@@ -62,9 +62,11 @@ public class CommentService {
 
         // If this is a reply, also notify the parent comment's author
         if (req.parentCommentId() != null) {
-            commentRepository.findById(req.parentCommentId()).ifPresent(parent ->
-                    notificationService.createAndPush(parent.getUserId(), currentUser.getId(), NotificationType.COMMENT, postId, "POST")
-            );
+            commentRepository.findById(req.parentCommentId()).ifPresent(parent -> {
+                if (parent.getPostId().equals(postId) && !parent.getUserId().equals(post.getUserId())) {
+                    notificationService.createAndPush(parent.getUserId(), currentUser.getId(), NotificationType.COMMENT, postId, "POST");
+                }
+            });
         }
 
         return toCommentResponse(comment, currentUser);

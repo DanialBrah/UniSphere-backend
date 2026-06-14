@@ -143,7 +143,7 @@ public class PostService {
     }
 
     public LikeToggleResponse toggleLike(Long postId, User currentUser) {
-        findActivePost(postId);
+        Post post = findActivePost(postId);
         Long userId = currentUser.getId();
 
         if (postLikeRepository.existsByPostIdAndUserId(postId, userId)) {
@@ -153,7 +153,6 @@ public class PostService {
         } else {
             postLikeRepository.save(new PostLike(postId, userId));
             redisIncrement(REDIS_POST_LIKES + postId, 1);
-            Post post = findActivePost(postId);
             notificationService.createAndPush(post.getUserId(), userId, NotificationType.LIKE, postId, "POST");
             return new LikeToggleResponse(true, postLikeRepository.countByPostId(postId));
         }

@@ -71,6 +71,8 @@ public class ConversationService {
 
     @Transactional(readOnly = true)
     public List<MemberSummary> getMembers(Long convId, User currentUser) {
+        conversationRepository.findById(convId)
+                .orElseThrow(() -> new ConversationNotFoundException(convId));
         assertMembership(convId, currentUser.getId());
         return memberRepository.findByConversationId(convId).stream()
                 .map(m -> {
@@ -105,6 +107,8 @@ public class ConversationService {
     }
 
     public MemberSummary promoteMember(Long convId, Long targetUserId, User currentUser) {
+        conversationRepository.findById(convId)
+                .orElseThrow(() -> new ConversationNotFoundException(convId));
         assertAdmin(convId, currentUser.getId());
         ConversationMember member = memberRepository.findByConversationIdAndUserId(convId, targetUserId)
                 .orElseThrow(() -> new IllegalArgumentException("User " + targetUserId + " is not a member of this conversation"));

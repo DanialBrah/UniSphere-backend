@@ -95,9 +95,14 @@ public class MessageService {
         List<MessageResponse> cached = readFromCache(convId);
         // Only use cache when fully populated so page boundaries align with DB sequence
         if (cached.size() == historyMaxMessages) {
+            // Sort cached list in descending order by createdAt to match DB ordering
+            cached = cached.stream()
+                    .sorted((a, b) -> b.createdAt().compareTo(a.createdAt()))
+                    .toList();
             int pageSize = pageable.getPageSize();
-            int start = pageable.getPageNumber() * pageSize;
-            if (start < (int) historyMaxMessages) {
+            long startLong = (long) pageable.getPageNumber() * pageSize;
+            if (startLong >= 0 && startLong < historyMaxMessages) {
+                int start = (int) startLong;
                 int end = Math.min(start + pageSize, (int) historyMaxMessages);
                 long dbTotal = messageRepository.countByConversationId(convId);
                 return new PageImpl<>(cached.subList(start, end), pageable, dbTotal);
