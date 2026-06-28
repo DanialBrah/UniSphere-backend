@@ -102,7 +102,7 @@ jobs:
         run: ./mvnw clean verify
 
       - name: SonarQube analysis
-        run: ./mvnw sonar:sonar -Dsonar.token=${{ secrets.SONAR_TOKEN }} -Dsonar.host.url=http://host.docker.internal:9000
+        run: ./mvnw sonar:sonar -Dsonar.token=${{ secrets.SONAR_TOKEN }} -Dsonar.host.url=http://host.docker.internal:9000 -Dsonar.qualitygate.wait=true
 
   deploy-to-render:
     name: Deploy to Render
