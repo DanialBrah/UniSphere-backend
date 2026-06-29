@@ -1,8 +1,8 @@
 package com.unisphere.backend.identity.service;
 
-import com.resend.Resend;
 import com.resend.core.exception.ResendException;
 import com.resend.services.emails.model.CreateEmailOptions;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
@@ -10,16 +10,13 @@ import org.springframework.stereotype.Service;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class EmailService {
 
-    private final Resend resend;
+    private final EmailSenderClient emailSenderClient;
 
     @Value("${app.mail.from}")
     private String mailFrom;
-
-    public EmailService(@Value("${resend.api-key}") String apiKey) {
-        this.resend = new Resend(apiKey);
-    }
 
     @Async
     public void sendPasswordResetEmail(String toEmail, String resetLink) {
@@ -30,7 +27,7 @@ public class EmailService {
                     .subject("Reset your UniSphere password")
                     .html(buildResetEmailHtml(resetLink))
                     .build();
-            resend.emails().send(params);
+            emailSenderClient.send(params);
             log.info("Password reset email sent to {}", toEmail);
         } catch (ResendException e) {
             log.error("Failed to send password reset email to {}: {}", toEmail, e.getMessage());

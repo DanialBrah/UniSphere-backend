@@ -6,6 +6,7 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.validation.annotation.Validated;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -57,6 +58,7 @@ public class B2Config {
     }
 
     @Bean
+    @Profile("!ci")
     S3Client s3Client() {
         return S3Client.builder()
                 .endpointOverride(URI.create(endpoint))
@@ -67,6 +69,7 @@ public class B2Config {
     }
 
     @Bean
+    @Profile("!ci")
     S3Presigner s3Presigner() {
         return S3Presigner.builder()
                 .endpointOverride(URI.create(endpoint))
