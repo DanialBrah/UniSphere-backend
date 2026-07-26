@@ -1,5 +1,8 @@
 package com.unisphere.backend.config;
 
+import com.unisphere.backend.common.ratelimit.IpRateLimitFilter;
+import com.unisphere.backend.common.ratelimit.RateLimitPaths;
+import com.unisphere.backend.common.ratelimit.UserRateLimitFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -29,26 +32,12 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final IpRateLimitFilter ipRateLimitFilter;
+    private final UserRateLimitFilter userRateLimitFilter;
     private final AuthenticationProvider authenticationProvider;
 
     @Value("${cors.allowed-origins:http://localhost:5173}")
     private String allowedOrigins;
-
-    private static final String[] PUBLIC_PATHS = {
-            // Auth endpoints that don't require a token
-            "/api/v1/auth/register/**",
-            "/api/v1/auth/login",
-            "/api/v1/auth/refresh",
-            "/api/v1/auth/forgot-password",
-            "/api/v1/auth/reset-password",
-            // Infrastructure
-            "/api/health",
-            "/swagger-ui/**",
-            "/swagger-ui.html",
-            "/v3/api-docs/**",
-            // WebSocket handshake — JWT is validated inside JwtChannelInterceptor on STOMP CONNECT
-            "/ws/**"
-    };
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -56,14 +45,22 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(PUBLIC_PATHS).permitAll()
+                        .requestMatchers(RateLimitPaths.PUBLIC_PATHS.toArray(new String[0])).permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authenticationProvider(authenticationProvider)
+                // jwtAuthFilter must be registered first — it's anchored to the known
+                // UsernamePasswordAuthenticationFilter class, which is what teaches Spring
+                // Security where JwtAuthenticationFilter itself sits. The two rate-limit
+                // filters below then anchor to THAT (now-registered) position; referencing
+                // JwtAuthenticationFilter.class before it's registered throws
+                // "does not have a registered order" at startup.
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(ipRateLimitFilter, JwtAuthenticationFilter.class)
+                .addFilterAfter(userRateLimitFilter, JwtAuthenticationFilter.class)
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
                         .accessDeniedHandler((req, res, e) -> res.sendError(HttpStatus.FORBIDDEN.value()))
