@@ -18,8 +18,11 @@ import java.io.IOException;
 /**
  * Runs BEFORE {@code JwtAuthenticationFilter} — there is no authenticated principal yet, so this
  * tier limits by client IP. Scoped to every unauthenticated path in {@link RateLimitPaths#PUBLIC_PATHS}
- * (auth endpoints plus health/swagger/api-docs/ws); everything else — every protected endpoint —
- * is left to {@link UserRateLimitFilter}.
+ * (auth endpoints plus swagger/api-docs/ws) except {@code /api/health}, which is exempt entirely
+ * — it's not a meaningful attack surface, and its global (Redis-shared) counter would otherwise
+ * get hit by every scaled instance's health probe against the same budget, risking a healthy
+ * deployment tripping 429s on itself. Everything else — every protected endpoint — is left to
+ * {@link UserRateLimitFilter}.
  */
 @Slf4j
 @Component
@@ -42,7 +45,10 @@ public class IpRateLimitFilter extends OncePerRequestFilter {
         boolean isPublicPath = RateLimitPaths.PUBLIC_PATHS.stream()
                 .anyMatch(pattern -> PATH_MATCHER.match(pattern, request.getServletPath()));
 
-        if (!properties.isEnabled() || HttpMethod.OPTIONS.matches(request.getMethod()) || !isPublicPath) {
+        if (!properties.isEnabled()
+                || HttpMethod.OPTIONS.matches(request.getMethod())
+                || !isPublicPath
+                || "/api/health".equals(request.getServletPath())) {
             filterChain.doFilter(request, response);
             return;
         }

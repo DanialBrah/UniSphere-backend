@@ -75,13 +75,14 @@ class IpRateLimitFilterTest {
 
     @Test
     void publicInfraPath_getsSameStrictTierAsAuthPaths() throws Exception {
-        // /api/health, swagger, api-docs, /ws are all public — every one of them now gets the
-        // same strict IP-keyed limit as the login/register endpoints, not just the auth ones.
+        // swagger, api-docs, /ws are all public — every one of them gets the same strict
+        // IP-keyed limit as the login/register endpoints, not just the auth ones. /api/health is
+        // the one deliberate exception (see healthEndpoint_alwaysExempt below).
         when(rateLimiterService.tryConsume(anyString(), eq(properties.getAuth()))).thenReturn(false);
         when(rateLimiterService.retryAfterSeconds(anyString(), eq(properties.getAuth()))).thenReturn(30L);
 
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/health");
-        request.setServletPath("/api/health");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/swagger-ui.html");
+        request.setServletPath("/swagger-ui.html");
         MockHttpServletResponse response = new MockHttpServletResponse();
         FilterChain chain = mock(FilterChain.class);
 
@@ -90,6 +91,22 @@ class IpRateLimitFilterTest {
         verify(rateLimiterService).tryConsume(anyString(), eq(properties.getAuth()));
         verify(chain, never()).doFilter(any(), any());
         assertThat(response.getStatus()).isEqualTo(429);
+    }
+
+    @Test
+    void healthEndpoint_alwaysExempt_evenThoughItsInPublicPaths() throws Exception {
+        // Global (Redis-shared) counter would otherwise get hit by every scaled instance's
+        // health probe against the same budget — not a meaningful attack surface either.
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/health");
+        request.setServletPath("/api/health");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verifyNoInteractions(rateLimiterService);
+        verify(chain).doFilter(request, response);
+        assertThat(response.getStatus()).isEqualTo(200);
     }
 
     @Test
