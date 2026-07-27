@@ -1,21 +1,98 @@
 package com.unisphere.backend.social.posting.controller;
 
+import com.unisphere.backend.identity.dto.LoginRequest;
+import com.unisphere.backend.identity.entity.Admin;
+import com.unisphere.backend.identity.entity.Student;
+import com.unisphere.backend.identity.entity.University;
+import com.unisphere.backend.identity.entity.UserStatus;
+import com.unisphere.backend.identity.repository.AdminRepository;
+import com.unisphere.backend.identity.repository.StudentRepository;
+import com.unisphere.backend.identity.repository.UniversityRepository;
+import com.unisphere.backend.social.follow.entity.Follow;
+import com.unisphere.backend.social.follow.repository.FollowRepository;
 import com.unisphere.backend.social.posting.AbstractPostingIntegrationTest;
 import com.unisphere.backend.social.posting.dto.request.CreatePostRequest;
 import com.unisphere.backend.social.posting.dto.request.UpdatePostRequest;
 import com.unisphere.backend.social.posting.enums.PostType;
 import com.unisphere.backend.social.posting.enums.PostVisibility;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.web.servlet.MvcResult;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+
+import java.util.List;
 
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class PostControllerTest extends AbstractPostingIntegrationTest {
 
     private static final String BASE = "/api/v1/posts";
+
+    @Autowired
+    private FollowRepository followRepository;
+
+    @Autowired
+    private StudentRepository studentRepository;
+
+    @Autowired
+    private UniversityRepository universityRepository;
+
+    @Autowired
+    private AdminRepository adminRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    private static final String ADMIN_PASSWORD = "Password123!";
+
+    private String registerAdminAndGetToken(String email) throws Exception {
+        Admin admin = new Admin();
+        admin.setEmail(email);
+        admin.setPassword(passwordEncoder.encode(ADMIN_PASSWORD));
+        admin.setStatus(UserStatus.ACTIVE);
+        admin.setVerified(true);
+        admin.setFullName("Test Admin");
+        adminRepository.save(admin);
+
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest(email, ADMIN_PASSWORD))))
+                .andExpect(status().isOk())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString())
+                .at("/data/accessToken").asText();
+    }
+
+    private Long createUniversity(String email) {
+        University u = new University();
+        u.setEmail(email);
+        u.setPassword("unused");
+        u.setStatus(UserStatus.ACTIVE);
+        u.setVerified(true);
+        u.setName("Test University");
+        return universityRepository.save(u).getId();
+    }
+
+    private Long getUserId(String token) throws Exception {
+        return objectMapper.readTree(
+                        mockMvc.perform(get("/api/v1/auth/me")
+                                        .header("Authorization", "Bearer " + token))
+                                .andReturn().getResponse().getContentAsString())
+                .at("/data/id").asLong();
+    }
+
+    private void setStudentUniversityId(Long userId, Long universityId) {
+        Student s = studentRepository.findById(userId).orElseThrow();
+        s.setUniversityId(universityId);
+        studentRepository.save(s);
+    }
 
     // ── Create post ───────────────────────────────────────────────────────────
 
@@ -72,7 +149,7 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.postType").value("IMAGE"))
-                .andExpect(jsonPath("$.data.media[0].mediaUrl").value("posts/1/photo.jpg"));
+                .andExpect(jsonPath("$.data.media[0].mediaUrl").value("https://s3.us-west-004.backblazeb2.com/posts/posts/1/photo.jpg"));
     }
 
     // ── Feed ─────────────────────────────────────────────────────────────────
@@ -174,6 +251,21 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    void updatePost_asNonOwner_onPrivatePost_returns404() throws Exception {
+        String ownerToken = registerStudentAndGetToken("post.update.private.owner@test.com", "MAT1023");
+        String otherToken = registerStudentAndGetToken("post.update.private.other@test.com", "MAT1024");
+        Long postId = createPostWithVisibility(ownerToken, "Owner's private post", PostVisibility.PRIVATE);
+
+        UpdatePostRequest update = new UpdatePostRequest(null, "Hacked!", null, null, null);
+
+        mockMvc.perform(put(BASE + "/{postId}", postId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + otherToken)
+                        .content(objectMapper.writeValueAsString(update)))
+                .andExpect(status().isNotFound());
+    }
+
     // ── Delete post ───────────────────────────────────────────────────────────
 
     @Test
@@ -201,6 +293,17 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
         mockMvc.perform(delete(BASE + "/{postId}", postId)
                         .header("Authorization", "Bearer " + otherToken))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void deletePost_asNonOwner_onPrivatePost_returns404() throws Exception {
+        String ownerToken = registerStudentAndGetToken("del.private.owner@test.com", "MAT1025");
+        String otherToken = registerStudentAndGetToken("del.private.other@test.com", "MAT1026");
+        Long postId = createPostWithVisibility(ownerToken, "Owner's private post", PostVisibility.PRIVATE);
+
+        mockMvc.perform(delete(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isNotFound());
     }
 
     // ── Like ─────────────────────────────────────────────────────────────────
@@ -364,7 +467,8 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.media").isArray())
-                .andExpect(jsonPath("$.data.media[0].mediaUrl").value("posts/" + userId + "/new-photo.jpg"));
+                .andExpect(jsonPath("$.data.media[0].mediaUrl").value(
+                        "https://s3.us-west-004.backblazeb2.com/posts/posts/" + userId + "/new-photo.jpg"));
     }
 
     @Test
@@ -407,5 +511,280 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
                         .content(objectMapper.writeValueAsString(removeReq)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.media").isEmpty());
+    }
+
+    // ── Visibility enforcement ─────────────────────────────────────────────────
+
+    @Test
+    void getPost_privateVisibility_nonOwnerReturns404() throws Exception {
+        String ownerToken = registerStudentAndGetToken("private.owner@test.com", "MAT2001");
+        String otherToken = registerStudentAndGetToken("private.other@test.com", "MAT2002");
+        Long postId = createPostWithVisibility(ownerToken, "Secret post", PostVisibility.PRIVATE);
+
+        mockMvc.perform(get(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getPost_privateVisibility_ownerReturns200() throws Exception {
+        String token = registerStudentAndGetToken("private.self@test.com", "MAT2003");
+        Long postId = createPostWithVisibility(token, "My secret post", PostVisibility.PRIVATE);
+
+        mockMvc.perform(get(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(postId));
+    }
+
+    @Test
+    void getPost_friendsVisibility_nonFriendReturns404() throws Exception {
+        String ownerToken = registerStudentAndGetToken("friends.owner@test.com", "MAT2004");
+        String otherToken = registerStudentAndGetToken("friends.other@test.com", "MAT2005");
+        Long postId = createPostWithVisibility(ownerToken, "Friends-only post", PostVisibility.FRIENDS);
+
+        mockMvc.perform(get(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getPost_friendsVisibility_mutualFollowerReturns200() throws Exception {
+        String ownerToken  = registerStudentAndGetToken("mutual.owner@test.com", "MAT2006");
+        String friendToken = registerStudentAndGetToken("mutual.friend@test.com", "MAT2007");
+        Long ownerId  = getUserId(ownerToken);
+        Long friendId = getUserId(friendToken);
+        Long postId = createPostWithVisibility(ownerToken, "Friends-only post", PostVisibility.FRIENDS);
+
+        followRepository.save(new Follow(ownerId, friendId));
+        followRepository.save(new Follow(friendId, ownerId));
+
+        mockMvc.perform(get(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + friendToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(postId));
+    }
+
+    @Test
+    void getPost_friendsVisibility_oneSidedFollowReturns404() throws Exception {
+        String ownerToken    = registerStudentAndGetToken("onesided.owner@test.com", "MAT2008");
+        String followerToken = registerStudentAndGetToken("onesided.follower@test.com", "MAT2009");
+        Long ownerId    = getUserId(ownerToken);
+        Long followerId = getUserId(followerToken);
+        Long postId = createPostWithVisibility(ownerToken, "Friends-only post", PostVisibility.FRIENDS);
+
+        // Only one direction — not mutual
+        followRepository.save(new Follow(followerId, ownerId));
+
+        mockMvc.perform(get(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + followerToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getPost_universityVisibility_sameUniversityReturns200() throws Exception {
+        String ownerToken  = registerStudentAndGetToken("uni.owner@test.com", "MAT2010");
+        String sameUniToken = registerStudentAndGetToken("uni.same@test.com", "MAT2011");
+        Long ownerId   = getUserId(ownerToken);
+        Long sameUniId = getUserId(sameUniToken);
+        Long universityId = createUniversity("uni.school1@test.com");
+        setStudentUniversityId(ownerId, universityId);
+        setStudentUniversityId(sameUniId, universityId);
+
+        Long postId = createPostWithVisibility(ownerToken, "University-only post", PostVisibility.UNIVERSITY);
+
+        mockMvc.perform(get(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + sameUniToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(postId));
+    }
+
+    @Test
+    void getPost_universityVisibility_differentUniversityReturns404() throws Exception {
+        String ownerToken = registerStudentAndGetToken("uni2.owner@test.com", "MAT2012");
+        String otherToken = registerStudentAndGetToken("uni2.other@test.com", "MAT2013");
+        Long ownerId = getUserId(ownerToken);
+        setStudentUniversityId(ownerId, createUniversity("uni.school2@test.com"));
+        // otherToken's student is left with no universityId — different (absent) affiliation
+
+        Long postId = createPostWithVisibility(ownerToken, "University-only post", PostVisibility.UNIVERSITY);
+
+        mockMvc.perform(get(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getPostsByUser_excludesPrivatePostForStranger_includesForOwner() throws Exception {
+        String ownerToken = registerStudentAndGetToken("byuser.private.owner@test.com", "MAT2014");
+        String otherToken = registerStudentAndGetToken("byuser.private.other@test.com", "MAT2015");
+        Long ownerId = getUserId(ownerToken);
+        Long privatePostId = createPostWithVisibility(ownerToken, "Owner's private post", PostVisibility.PRIVATE);
+
+        mockMvc.perform(get(BASE + "/user/{userId}?page=0&size=10", ownerId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.id == " + privatePostId + ")]").isEmpty());
+
+        mockMvc.perform(get(BASE + "/user/{userId}?page=0&size=10", ownerId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.id == " + privatePostId + ")]").exists());
+    }
+
+    @Test
+    void toggleLike_onPrivatePost_asNonOwner_returns404() throws Exception {
+        String ownerToken = registerStudentAndGetToken("like.private.owner@test.com", "MAT2016");
+        String otherToken = registerStudentAndGetToken("like.private.other@test.com", "MAT2017");
+        Long postId = createPostWithVisibility(ownerToken, "Private post", PostVisibility.PRIVATE);
+
+        mockMvc.perform(post(BASE + "/{postId}/like", postId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void toggleSave_onPrivatePost_asNonOwner_returns404() throws Exception {
+        String ownerToken = registerStudentAndGetToken("save.private.owner@test.com", "MAT2018");
+        String otherToken = registerStudentAndGetToken("save.private.other@test.com", "MAT2019");
+        Long postId = createPostWithVisibility(ownerToken, "Private post", PostVisibility.PRIVATE);
+
+        mockMvc.perform(post(BASE + "/{postId}/save", postId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getPost_privatePostWithMedia_returnsPresignedNotPassthroughUrl() throws Exception {
+        String token = registerStudentAndGetToken("private.media@test.com", "MAT2020");
+        Long userId = getUserId(token);
+        CreatePostRequest.MediaItem mediaItem = new CreatePostRequest.MediaItem(
+                "posts/" + userId + "/private-photo.jpg", "image/jpeg");
+        Long postId = createPostWithVisibilityAndMedia(
+                token, "Private photo post", PostVisibility.PRIVATE, List.of(mediaItem));
+
+        mockMvc.perform(get(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.media[0].mediaUrl").value(
+                        "https://mock-storage.example.com/unisphere-posts/posts/1/test.jpg?get"));
+    }
+
+    // ── Admin bypass ─────────────────────────────────────────────────────────
+
+    @Test
+    void getPost_asAdmin_onOthersPrivatePost_returns200() throws Exception {
+        String ownerToken = registerStudentAndGetToken("admin.view.owner@test.com", "MAT4001");
+        Long postId = createPostWithVisibility(ownerToken, "Private post", PostVisibility.PRIVATE);
+        String adminToken = registerAdminAndGetToken("admin.view@test.com");
+
+        mockMvc.perform(get(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(postId));
+    }
+
+    @Test
+    void deletePost_asAdmin_onOthersPrivatePost_returns200() throws Exception {
+        String ownerToken = registerStudentAndGetToken("admin.delete.owner@test.com", "MAT4002");
+        Long postId = createPostWithVisibility(ownerToken, "Private post", PostVisibility.PRIVATE);
+        String adminToken = registerAdminAndGetToken("admin.delete@test.com");
+
+        mockMvc.perform(delete(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+    }
+
+    // ── Liked/saved/search visibility filtering ─────────────────────────────
+
+    @Test
+    void getLikedPosts_afterPostBecomesPrivate_excludedFromList() throws Exception {
+        String ownerToken = registerStudentAndGetToken("liked.vis.owner@test.com", "MAT4003");
+        String otherToken = registerStudentAndGetToken("liked.vis.other@test.com", "MAT4004");
+        Long postId = createTextPost(ownerToken, "Post to like then hide"); // PUBLIC by default
+
+        mockMvc.perform(post(BASE + "/{postId}/like", postId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isOk());
+
+        UpdatePostRequest makePrivate = new UpdatePostRequest(null, null, PostVisibility.PRIVATE, null, null);
+        mockMvc.perform(put(BASE + "/{postId}", postId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(objectMapper.writeValueAsString(makePrivate)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get(BASE + "/liked?page=0&size=10")
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.id == " + postId + ")]").isEmpty());
+    }
+
+    @Test
+    void getSavedPosts_afterPostBecomesPrivate_excludedFromList() throws Exception {
+        String ownerToken = registerStudentAndGetToken("saved.vis.owner@test.com", "MAT4005");
+        String otherToken = registerStudentAndGetToken("saved.vis.other@test.com", "MAT4006");
+        Long postId = createTextPost(ownerToken, "Post to save then hide");
+
+        mockMvc.perform(post(BASE + "/{postId}/save", postId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isOk());
+
+        UpdatePostRequest makePrivate = new UpdatePostRequest(null, null, PostVisibility.PRIVATE, null, null);
+        mockMvc.perform(put(BASE + "/{postId}", postId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(objectMapper.writeValueAsString(makePrivate)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get(BASE + "/saved?page=0&size=10")
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.id == " + postId + ")]").isEmpty());
+    }
+
+    @Test
+    void searchPosts_afterPostBecomesPrivate_excludedFromResults() throws Exception {
+        String ownerToken = registerStudentAndGetToken("search.vis.owner@test.com", "MAT4007");
+        String otherToken = registerStudentAndGetToken("search.vis.other@test.com", "MAT4008");
+        Long postId = createTextPost(ownerToken, "UnisphereSearchVisibilityMarker content");
+
+        mockMvc.perform(get(BASE + "/search?q=UnisphereSearchVisibilityMarker")
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.id == " + postId + ")]").exists());
+
+        UpdatePostRequest makePrivate = new UpdatePostRequest(null, null, PostVisibility.PRIVATE, null, null);
+        mockMvc.perform(put(BASE + "/{postId}", postId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(objectMapper.writeValueAsString(makePrivate)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get(BASE + "/search?q=UnisphereSearchVisibilityMarker")
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.id == " + postId + ")]").isEmpty());
+    }
+
+    // ── Presign fail-open ────────────────────────────────────────────────────
+
+    @Test
+    void getPost_presignedGetFails_fallsBackToPlainUrlInsteadOf500() throws Exception {
+        String token = registerStudentAndGetToken("presign.fail@test.com", "MAT4009");
+        Long userId = getUserId(token);
+        CreatePostRequest.MediaItem mediaItem = new CreatePostRequest.MediaItem(
+                "posts/" + userId + "/fail-photo.jpg", "image/jpeg");
+        Long postId = createPostWithVisibilityAndMedia(
+                token, "Private photo post", PostVisibility.PRIVATE, List.of(mediaItem));
+
+        Mockito.when(s3Presigner.presignGetObject(any(GetObjectPresignRequest.class)))
+                .thenThrow(new RuntimeException("Simulated signer failure"));
+
+        mockMvc.perform(get(BASE + "/{postId}", postId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.media[0].mediaUrl").value(
+                        "https://s3.us-west-004.backblazeb2.com/posts/posts/" + userId + "/fail-photo.jpg"));
     }
 }

@@ -18,28 +18,29 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import java.net.URI;
 
 @Configuration
-@ConfigurationProperties(prefix = "backblaze.b2")
+@ConfigurationProperties(prefix = "object-storage")
 @Validated
 @Getter
 @Setter
-public class B2Config {
+public class ObjectStorageConfig {
 
-    /** Full S3-compatible endpoint, e.g. https://s3.us-west-004.backblazeb2.com */
-    @NotBlank(message = "backblaze.b2.endpoint must not be blank")
+    /** Full S3-compatible endpoint, e.g. https://s3.us-west-004.backblazeb2.com or https://storage.googleapis.com */
+    @NotBlank(message = "object-storage.endpoint must not be blank")
     private String endpoint;
 
-    /** Region matching the endpoint, e.g. us-west-004 */
-    @NotBlank(message = "backblaze.b2.region must not be blank")
+    /** Region matching the endpoint */
+    @NotBlank(message = "object-storage.region must not be blank")
     private String region;
 
-    /** Backblaze Application Key ID (used as S3 access key) */
-    private String keyId;
+    /** S3-compatible access key ID */
+    private String accessKeyId;
 
-    /** Backblaze Application Key (used as S3 secret key) */
-    private String applicationKey;
+    /** S3-compatible secret access key */
+    private String secretAccessKey;
 
     private Bucket bucket = new Bucket();
     private int presignExpiryMinutes = 5;
+    private int presignGetExpiryMinutes = 15;
 
     @Getter
     @Setter
@@ -47,8 +48,13 @@ public class B2Config {
         private String posts = "posts";
     }
 
+    /** Builds the absolute, publicly-fetchable URL for a stored object key. */
+    public String resolveMediaUrl(String key) {
+        return endpoint + "/" + bucket.getPosts() + "/" + key;
+    }
+
     private StaticCredentialsProvider credentials() {
-        return StaticCredentialsProvider.create(AwsBasicCredentials.create(keyId, applicationKey));
+        return StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKeyId, secretAccessKey));
     }
 
     private S3Configuration s3Configuration() {

@@ -44,10 +44,14 @@ public class CommentService {
     private final CommentMapper commentMapper;
     private final RedisTemplate<String, Long> redisTemplate;
     private final NotificationService notificationService;
+    private final PostAccessService postAccessService;
 
     public CommentResponse createComment(Long postId, CreateCommentRequest req, User currentUser) {
         var post = postRepository.findActiveById(postId)
                 .orElseThrow(() -> new PostNotFoundException(postId));
+        if (!postAccessService.canView(post, currentUser)) {
+            throw new PostNotFoundException(postId);
+        }
 
         Comment comment = new Comment();
         comment.setPostId(postId);
@@ -74,6 +78,11 @@ public class CommentService {
 
     @Transactional(readOnly = true)
     public Page<CommentResponse> getTopLevelComments(Long postId, Pageable pageable, User currentUser) {
+        var post = postRepository.findActiveById(postId)
+                .orElseThrow(() -> new PostNotFoundException(postId));
+        if (!postAccessService.canView(post, currentUser)) {
+            throw new PostNotFoundException(postId);
+        }
         return commentRepository
                 .findByPostIdAndParentCommentIdIsNullOrderByCreatedAtAsc(postId, pageable)
                 .map(c -> toCommentResponse(c, currentUser));
@@ -81,6 +90,8 @@ public class CommentService {
 
     @Transactional(readOnly = true)
     public Page<CommentResponse> getReplies(Long commentId, Pageable pageable, User currentUser) {
+        Comment parent = findActiveComment(commentId);
+        assertCanViewParentPost(parent, currentUser);
         return commentRepository
                 .findByParentCommentIdOrderByCreatedAtAsc(commentId, pageable)
                 .map(c -> toCommentResponse(c, currentUser));
@@ -88,6 +99,7 @@ public class CommentService {
 
     public CommentResponse updateComment(Long commentId, UpdateCommentRequest req, User currentUser) {
         Comment comment = findActiveComment(commentId);
+        assertCanViewParentPost(comment, currentUser);
         assertOwner(comment.getUserId(), currentUser);
         comment.setContent(req.content());
         return toCommentResponse(commentRepository.save(comment), currentUser);
@@ -95,6 +107,7 @@ public class CommentService {
 
     public void deleteComment(Long commentId, User currentUser) {
         Comment comment = findActiveComment(commentId);
+        assertCanViewParentPost(comment, currentUser);
         if (!comment.getUserId().equals(currentUser.getId()) && currentUser.getRole() != Role.ADMIN) {
             throw new UnauthorizedActionException("You cannot delete this comment");
         }
@@ -103,7 +116,8 @@ public class CommentService {
     }
 
     public LikeToggleResponse toggleLike(Long commentId, User currentUser) {
-        findActiveComment(commentId);
+        Comment comment = findActiveComment(commentId);
+        assertCanViewParentPost(comment, currentUser);
         Long userId = currentUser.getId();
 
         if (commentLikeRepository.existsByCommentIdAndUserId(commentId, userId)) {
@@ -122,6 +136,17 @@ public class CommentService {
     private Comment findActiveComment(Long commentId) {
         return commentRepository.findById(commentId)
                 .orElseThrow(() -> new CommentNotFoundException(commentId));
+    }
+
+    // Comments never carry their own visibility — they inherit the parent post's. Resolving
+    // through Comment.postId (not a caller-supplied postId) matters because the controller doesn't
+    // validate that a path's postId actually owns the given commentId.
+    private void assertCanViewParentPost(Comment comment, User currentUser) {
+        var post = postRepository.findActiveById(comment.getPostId())
+                .orElseThrow(() -> new PostNotFoundException(comment.getPostId()));
+        if (!postAccessService.canView(post, currentUser)) {
+            throw new PostNotFoundException(comment.getPostId());
+        }
     }
 
     private void assertOwner(Long ownerId, User currentUser) {

@@ -2,7 +2,7 @@ package com.unisphere.backend.social.posting.service;
 
 import com.unisphere.backend.common.exception.MediaUploadException;
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
-import com.unisphere.backend.config.B2Config;
+import com.unisphere.backend.config.ObjectStorageConfig;
 import com.unisphere.backend.identity.entity.User;
 import com.unisphere.backend.social.posting.dto.request.MediaPresignRequest;
 import com.unisphere.backend.social.posting.dto.response.MediaPresignResponse;
@@ -26,11 +26,11 @@ public class MediaService {
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "gif", "webp", "mp4", "mov");
 
     private final MediaStorageClient mediaStorageClient;
-    private final B2Config b2Config;
+    private final ObjectStorageConfig storageConfig;
 
     @PostConstruct
     void ensureBucketExists() {
-        mediaStorageClient.ensureBucketExists(b2Config.getBucket().getPosts());
+        mediaStorageClient.ensureBucketExists(storageConfig.getBucket().getPosts());
     }
 
     public MediaPresignResponse presignUpload(MediaPresignRequest request, User currentUser) {
@@ -39,11 +39,11 @@ public class MediaService {
             throw new IllegalArgumentException("File type not allowed: " + ext);
         }
 
-        String bucket   = b2Config.getBucket().getPosts();
+        String bucket   = storageConfig.getBucket().getPosts();
         String mediaKey = "posts/" + currentUser.getId() + "/" + UUID.randomUUID() + "." + ext;
 
         String uploadUrl = mediaStorageClient.presignPutUrl(
-                bucket, mediaKey, request.contentType(), b2Config.getPresignExpiryMinutes());
+                bucket, mediaKey, request.contentType(), storageConfig.getPresignExpiryMinutes());
         return new MediaPresignResponse(uploadUrl, mediaKey);
     }
 
@@ -54,17 +54,17 @@ public class MediaService {
             throw new IllegalArgumentException("File type not allowed: " + ext);
         }
 
-        String bucket   = b2Config.getBucket().getPosts();
+        String bucket   = storageConfig.getBucket().getPosts();
         String mediaKey = "posts/" + currentUser.getId() + "/" + UUID.randomUUID() + "." + ext;
         String contentType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
 
         try (InputStream inputStream = file.getInputStream()) {
             mediaStorageClient.putObject(bucket, mediaKey, contentType, inputStream, file.getSize());
         } catch (Exception ex) {
-            throw new MediaUploadException("Failed to upload file to B2: " + ex.getMessage(), ex);
+            throw new MediaUploadException("Failed to upload file to object storage: " + ex.getMessage(), ex);
         }
 
-        String mediaUrl = b2Config.getEndpoint() + "/" + bucket + "/" + mediaKey;
+        String mediaUrl = storageConfig.resolveMediaUrl(mediaKey);
         String mediaType = contentType.startsWith("video") ? "VIDEO" : "IMAGE";
         return new MediaUploadResponse(mediaKey, mediaUrl, mediaType);
     }
@@ -75,11 +75,11 @@ public class MediaService {
             throw new IllegalArgumentException("File type not allowed: " + ext);
         }
 
-        String bucket   = b2Config.getBucket().getPosts();
+        String bucket   = storageConfig.getBucket().getPosts();
         String mediaKey = "avatars/" + currentUser.getId() + "/" + UUID.randomUUID() + "." + ext;
 
         String uploadUrl = mediaStorageClient.presignPutUrl(
-                bucket, mediaKey, request.contentType(), b2Config.getPresignExpiryMinutes());
+                bucket, mediaKey, request.contentType(), storageConfig.getPresignExpiryMinutes());
         return new MediaPresignResponse(uploadUrl, mediaKey);
     }
 
@@ -91,7 +91,7 @@ public class MediaService {
             throw new UnauthorizedActionException("Cannot delete media that does not belong to you");
         }
 
-        mediaStorageClient.deleteObject(b2Config.getBucket().getPosts(), mediaKey);
+        mediaStorageClient.deleteObject(storageConfig.getBucket().getPosts(), mediaKey);
     }
 
     private String extractExtension(String filename) {

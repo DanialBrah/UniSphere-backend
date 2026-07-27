@@ -44,7 +44,30 @@ public class UserSeeder implements CommandLineRunner {
         seedUniversity();
         seedClub();
         seedAdmin();
+        linkUniversityAffiliations();
         log.info("User seeding complete.");
+    }
+
+    // Runs after all seeds so the university's DB-assigned id is known. Links the seeded student
+    // and alumni to it so UNIVERSITY-visibility posts have real, testable affiliation data —
+    // otherwise every seeded user has a null universityId and that visibility tier is unreachable
+    // with seed data alone.
+    private void linkUniversityAffiliations() {
+        userRepository.findByEmail("university@unisphere.dev").ifPresent(university -> {
+            userRepository.findByEmail("student@unisphere.dev")
+                    .flatMap(u -> studentRepository.findById(u.getId()))
+                    .ifPresent(student -> {
+                        student.setUniversityId(university.getId());
+                        studentRepository.save(student);
+                    });
+            userRepository.findByEmail("alumni@unisphere.dev")
+                    .flatMap(u -> alumniRepository.findById(u.getId()))
+                    .ifPresent(alumni -> {
+                        alumni.setUniversityId(university.getId());
+                        alumniRepository.save(alumni);
+                    });
+            log.info("Linked STUDENT and ALUMNI to UNIVERSITY → {}", university.getId());
+        });
     }
 
     // ── Student ──────────────────────────────────────────────────────────────

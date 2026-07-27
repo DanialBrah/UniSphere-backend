@@ -1,5 +1,7 @@
 package com.unisphere.backend.social.posting.seeder;
 
+import com.unisphere.backend.config.ObjectStorageConfig;
+import com.unisphere.backend.identity.entity.Student;
 import com.unisphere.backend.identity.entity.User;
 import com.unisphere.backend.identity.repository.UserRepository;
 import com.unisphere.backend.social.posting.entity.*;
@@ -38,6 +40,7 @@ public class PostSeeder implements CommandLineRunner {
     private final PostLikeRepository   postLikeRepository;
     private final CommentLikeRepository commentLikeRepository;
     private final PostSaveRepository   postSaveRepository;
+    private final ObjectStorageConfig  storageConfig;
 
     @Override
     @Transactional
@@ -91,6 +94,12 @@ public class PostSeeder implements CommandLineRunner {
         Post p7 = savePost(student.getId(), PostType.TEXT, PostVisibility.UNIVERSITY,
                 "Anyone else struggling with Algorithm Analysis assignment 3?",
                 "The time complexity question for the divide-and-conquer problem is breaking my brain 🧠. Has anyone figured out the recurrence relation for part (c)? Happy to swap notes if you have! DM me. #Algorithms #CS #UiTM");
+        if (student instanceof Student s && s.getUniversityId() != null) {
+            // Without a real universityId here, UNIVERSITY-visibility enforcement has no seed data
+            // to actually exercise — every seeded user otherwise has a null universityId.
+            p7.setUniversityId(s.getUniversityId());
+            postRepository.save(p7);
+        }
 
         log.info("Seeded {} posts.", 7);
 
@@ -238,7 +247,7 @@ public class PostSeeder implements CommandLineRunner {
     private void saveMedia(Post post, String key, MediaType type, int order) {
         PostMedia m = new PostMedia();
         m.setPost(post);
-        m.setMediaUrl(key);
+        m.setMediaUrl(storageConfig.resolveMediaUrl(key));
         m.setMediaType(type);
         m.setSortOrder(order);
         postMediaRepository.save(m);

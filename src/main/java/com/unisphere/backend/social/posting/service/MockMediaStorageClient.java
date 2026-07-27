@@ -18,8 +18,15 @@ public class MockMediaStorageClient implements MediaStorageClient {
 
     @Override
     public String presignPutUrl(String bucket, String key, String contentType, int expiryMinutes) {
-        String url = "https://mock-b2.local/" + bucket + "/" + key;
+        String url = "https://mock-storage.local/" + bucket + "/" + key;
         log.info("[ci] Returning fake presigned URL: {}", url);
+        return url;
+    }
+
+    @Override
+    public String presignGetUrl(String bucket, String key, int expiryMinutes) {
+        String url = "https://mock-storage.local/" + bucket + "/" + key + "?presigned=get";
+        log.info("[ci] Returning fake presigned GET URL: {}", url);
         return url;
     }
 

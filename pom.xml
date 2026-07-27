@@ -128,7 +128,7 @@
 			<artifactId>spring-boot-starter-websocket</artifactId>
 		</dependency>
 
-		<!-- ── AWS SDK v2 S3 (used for Cloudflare R2) ───────────── -->
+		<!-- ── AWS SDK v2 S3 (S3-compatible object storage — B2 / GCS / Garage) ── -->
 		<dependency>
 			<groupId>software.amazon.awssdk</groupId>
 			<artifactId>s3</artifactId>

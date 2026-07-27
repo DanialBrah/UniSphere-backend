@@ -2,6 +2,7 @@ package com.unisphere.backend.social.posting.service;
 
 import com.unisphere.backend.common.exception.PostNotFoundException;
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
+import com.unisphere.backend.config.ObjectStorageConfig;
 import com.unisphere.backend.identity.entity.Role;
 import com.unisphere.backend.identity.entity.User;
 import com.unisphere.backend.identity.repository.UserRepository;
@@ -17,6 +18,7 @@ import com.unisphere.backend.social.notification.enums.NotificationType;
 import com.unisphere.backend.social.notification.service.NotificationService;
 import com.unisphere.backend.social.posting.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -26,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 
+@Slf4j
 @Service
 @Transactional
 @RequiredArgsConstructor
@@ -42,6 +45,9 @@ public class PostService {
     private final PostMapper postMapper;
     private final RedisTemplate<String, Long> redisTemplate;
     private final NotificationService notificationService;
+    private final ObjectStorageConfig storageConfig;
+    private final MediaStorageClient mediaStorageClient;
+    private final PostAccessService postAccessService;
 
     public PostResponse createPost(CreatePostRequest req, User currentUser) {
         Post post = new Post();
@@ -49,15 +55,20 @@ public class PostService {
         post.setTitle(req.title());
         post.setContent(req.content());
         post.setPostType(req.postType() != null ? req.postType() : PostType.TEXT);
-        post.setVisibility(req.visibility() != null ? req.visibility() : PostVisibility.PUBLIC);
-        post.setUniversityId(req.universityId());
+        PostVisibility visibility = req.visibility() != null ? req.visibility() : PostVisibility.PUBLIC;
+        post.setVisibility(visibility);
+        // Never trust a client-supplied universityId — UNIVERSITY visibility's guarantee depends on
+        // this actually matching the poster's own affiliation, not an arbitrary client value.
+        post.setUniversityId(visibility == PostVisibility.UNIVERSITY
+                ? postAccessService.viewerUniversityId(currentUser)
+                : req.universityId());
 
         if (req.media() != null) {
             int order = 0;
             for (CreatePostRequest.MediaItem item : req.media()) {
                 PostMedia media = new PostMedia();
                 media.setPost(post);
-                media.setMediaUrl(item.mediaKey());
+                media.setMediaUrl(storageConfig.resolveMediaUrl(item.mediaKey()));
                 media.setMediaType(resolveMediaType(item.mediaType()));
                 media.setSortOrder(order++);
                 post.getMedia().add(media);
@@ -94,19 +105,27 @@ public class PostService {
     @Transactional(readOnly = true)
     public PostResponse getPostById(Long postId, User currentUser) {
         Post post = findActivePost(postId);
+        if (!postAccessService.canView(post, currentUser)) {
+            throw new PostNotFoundException(postId);
+        }
         redisIncrement(REDIS_POST_VIEWS + postId, 1);
         return toPostResponse(post, currentUser);
     }
 
     @Transactional(readOnly = true)
     public Page<PostResponse> getPostsByUser(Long userId, Pageable pageable, User currentUser) {
+        boolean isOwnerOrAdmin = userId.equals(currentUser.getId()) || currentUser.getRole() == Role.ADMIN;
+        boolean isFriend = isOwnerOrAdmin || postAccessService.isMutualFollow(currentUser.getId(), userId);
         return postRepository
-                .findByUserIdOrderByCreatedAtDesc(userId, pageable)
+                .findByUserIdVisibleTo(userId, isOwnerOrAdmin, postAccessService.viewerUniversityId(currentUser), isFriend, pageable)
                 .map(post -> toPostResponse(post, currentUser));
     }
 
     public PostResponse updatePost(Long postId, UpdatePostRequest req, User currentUser) {
         Post post = findActivePost(postId);
+        if (!postAccessService.canView(post, currentUser)) {
+            throw new PostNotFoundException(postId);
+        }
         assertOwner(post.getUserId(), currentUser);
 
         if (req.title() != null)      post.setTitle(req.title());
@@ -123,7 +142,7 @@ public class PostService {
             for (UpdatePostRequest.MediaItem item : req.addMedia()) {
                 PostMedia m = new PostMedia();
                 m.setPost(post);
-                m.setMediaUrl(item.mediaKey());
+                m.setMediaUrl(storageConfig.resolveMediaUrl(item.mediaKey()));
                 m.setMediaType(resolveMediaType(item.mediaType()));
                 m.setSortOrder(nextOrder++);
                 post.getMedia().add(m);
@@ -135,6 +154,9 @@ public class PostService {
 
     public void deletePost(Long postId, User currentUser) {
         Post post = findActivePost(postId);
+        if (!postAccessService.canView(post, currentUser)) {
+            throw new PostNotFoundException(postId);
+        }
         if (!post.getUserId().equals(currentUser.getId()) && currentUser.getRole() != Role.ADMIN) {
             throw new UnauthorizedActionException("You cannot delete this post");
         }
@@ -144,6 +166,9 @@ public class PostService {
 
     public LikeToggleResponse toggleLike(Long postId, User currentUser) {
         Post post = findActivePost(postId);
+        if (!postAccessService.canView(post, currentUser)) {
+            throw new PostNotFoundException(postId);
+        }
         Long userId = currentUser.getId();
 
         if (postLikeRepository.existsByPostIdAndUserId(postId, userId)) {
@@ -159,7 +184,10 @@ public class PostService {
     }
 
     public SaveToggleResponse toggleSave(Long postId, User currentUser) {
-        findActivePost(postId);
+        Post post = findActivePost(postId);
+        if (!postAccessService.canView(post, currentUser)) {
+            throw new PostNotFoundException(postId);
+        }
         Long userId = currentUser.getId();
 
         if (postSaveRepository.existsByUserIdAndPostId(userId, postId)) {
@@ -173,19 +201,25 @@ public class PostService {
 
     @Transactional(readOnly = true)
     public Page<PostResponse> getLikedPosts(Pageable pageable, User currentUser) {
-        return postRepository.findLikedPostsByUserId(currentUser.getId(), pageable)
+        boolean isAdmin = currentUser.getRole() == Role.ADMIN;
+        return postRepository.findLikedPostsByUserId(
+                        currentUser.getId(), isAdmin, postAccessService.viewerUniversityId(currentUser), pageable)
                 .map(post -> toPostResponse(post, currentUser));
     }
 
     @Transactional(readOnly = true)
     public Page<PostResponse> getSavedPosts(Pageable pageable, User currentUser) {
-        return postRepository.findSavedPostsByUserId(currentUser.getId(), pageable)
+        boolean isAdmin = currentUser.getRole() == Role.ADMIN;
+        return postRepository.findSavedPostsByUserId(
+                        currentUser.getId(), isAdmin, postAccessService.viewerUniversityId(currentUser), pageable)
                 .map(post -> toPostResponse(post, currentUser));
     }
 
     @Transactional(readOnly = true)
     public Page<PostResponse> searchPosts(String query, Pageable pageable, User currentUser) {
-        return postRepository.searchFullText(query, pageable)
+        boolean isAdmin = currentUser.getRole() == Role.ADMIN;
+        return postRepository.searchFullText(
+                        query, currentUser.getId(), isAdmin, postAccessService.viewerUniversityId(currentUser), pageable)
                 .map(post -> toPostResponse(post, currentUser));
     }
 
@@ -202,6 +236,26 @@ public class PostService {
         }
     }
 
+    private PostMediaResponse resolveViewableMedia(PostMediaResponse m, PostVisibility visibility) {
+        if (visibility == PostVisibility.PUBLIC) return m;
+
+        String prefix = storageConfig.getEndpoint() + "/" + storageConfig.getBucket().getPosts() + "/";
+        if (!m.mediaUrl().startsWith(prefix)) {
+            // Media predates a provider swap — can't be correctly presigned against the currently
+            // active provider's credentials. Falls back to the plain stored URL (no worse than today).
+            return m;
+        }
+        String key = m.mediaUrl().substring(prefix.length());
+        try {
+            String presigned = mediaStorageClient.presignGetUrl(
+                    storageConfig.getBucket().getPosts(), key, storageConfig.getPresignGetExpiryMinutes());
+            return new PostMediaResponse(m.id(), presigned, m.mediaType(), m.sortOrder());
+        } catch (Exception ex) {
+            log.warn("Presigned GET failed for media {}, falling back to stored URL: {}", m.id(), ex.getMessage());
+            return m;
+        }
+    }
+
     PostResponse toPostResponse(Post post, User currentUser) {
         Long userId = currentUser.getId();
         boolean liked = postLikeRepository.existsByPostIdAndUserId(post.getId(), userId);
@@ -210,6 +264,7 @@ public class PostService {
 
         List<PostMediaResponse> media = post.getMedia().stream()
                 .map(postMapper::toMediaResponse)
+                .map(m -> resolveViewableMedia(m, post.getVisibility()))
                 .toList();
 
         List<Long> taggedIds = post.getTags().stream()

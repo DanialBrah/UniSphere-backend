@@ -2,6 +2,7 @@ package com.unisphere.backend.identity.service;
 
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
 import com.unisphere.backend.common.exception.UserNotFoundException;
+import com.unisphere.backend.config.ObjectStorageConfig;
 import com.unisphere.backend.identity.dto.*;
 import com.unisphere.backend.identity.entity.*;
 import com.unisphere.backend.identity.mapper.UserMapper;
@@ -23,6 +24,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final UserMapper userMapper;
+    private final ObjectStorageConfig storageConfig;
 
     // ── Read ─────────────────────────────────────────────────────────────────
 
@@ -61,12 +63,13 @@ public class UserService {
         if (req.phone() != null) currentUser.setPhone(req.phone());
 
         if (req.avatarUrl() != null) {
-            String newAvatar = req.avatarUrl().isBlank() ? null : req.avatarUrl();
-            if (newAvatar != null && !newAvatar.startsWith("avatars/" + currentUser.getId() + "/")) {
+            String newAvatarKey = req.avatarUrl().isBlank() ? null : req.avatarUrl();
+            if (newAvatarKey != null && !newAvatarKey.startsWith("avatars/" + currentUser.getId() + "/")) {
                 throw new UnauthorizedActionException("Avatar key does not belong to the current user");
             }
-            currentUser.setAvatarUrl(newAvatar);
-            syncRoleAvatar(currentUser, newAvatar);
+            String newAvatarUrl = newAvatarKey != null ? storageConfig.resolveMediaUrl(newAvatarKey) : null;
+            currentUser.setAvatarUrl(newAvatarUrl);
+            syncRoleAvatar(currentUser, newAvatarUrl);
         }
 
         if (currentUser instanceof Student s) {

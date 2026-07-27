@@ -22,6 +22,8 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketResponse;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
@@ -36,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Base for all social/posting integration tests.
- * Mocks Redis and B2 so tests only need a MySQL container.
+ * Mocks Redis and object storage so tests only need a MySQL container.
  */
 public abstract class AbstractPostingIntegrationTest extends AbstractIntegrationTest {
 
@@ -84,10 +86,18 @@ public abstract class AbstractPostingIntegrationTest extends AbstractIntegration
         PresignedPutObjectRequest fakePresigned = Mockito.mock(PresignedPutObjectRequest.class);
         Mockito.lenient()
                 .when(fakePresigned.url())
-                .thenReturn(URI.create("https://f004.backblazeb2.com/file/unisphere-posts/posts/1/test.jpg").toURL());
+                .thenReturn(URI.create("https://mock-storage.example.com/unisphere-posts/posts/1/test.jpg").toURL());
         Mockito.lenient()
                 .when(s3Presigner.presignPutObject(any(PutObjectPresignRequest.class)))
                 .thenReturn(fakePresigned);
+
+        PresignedGetObjectRequest fakeGetPresigned = Mockito.mock(PresignedGetObjectRequest.class);
+        Mockito.lenient()
+                .when(fakeGetPresigned.url())
+                .thenReturn(URI.create("https://mock-storage.example.com/unisphere-posts/posts/1/test.jpg?get").toURL());
+        Mockito.lenient()
+                .when(s3Presigner.presignGetObject(any(GetObjectPresignRequest.class)))
+                .thenReturn(fakeGetPresigned);
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -108,9 +118,23 @@ public abstract class AbstractPostingIntegrationTest extends AbstractIntegration
     }
 
     protected Long createTextPost(String token, String content) throws Exception {
+        return createPost(token, content, PostType.TEXT, PostVisibility.PUBLIC, null, null);
+    }
+
+    protected Long createPostWithVisibility(String token, String content, PostVisibility visibility) throws Exception {
+        return createPost(token, content, PostType.TEXT, visibility, null, null);
+    }
+
+    protected Long createPostWithVisibilityAndMedia(
+            String token, String content, PostVisibility visibility, java.util.List<CreatePostRequest.MediaItem> media
+    ) throws Exception {
+        return createPost(token, content, PostType.IMAGE, visibility, null, media);
+    }
+
+    private Long createPost(String token, String content, PostType postType, PostVisibility visibility,
+                             Long universityId, java.util.List<CreatePostRequest.MediaItem> media) throws Exception {
         CreatePostRequest req = new CreatePostRequest(
-                "Test Post", content, PostType.TEXT, PostVisibility.PUBLIC,
-                null, null, null
+                "Test Post", content, postType, visibility, universityId, null, media
         );
         MvcResult result = mockMvc.perform(post("/api/v1/posts")
                         .contentType(MediaType.APPLICATION_JSON)

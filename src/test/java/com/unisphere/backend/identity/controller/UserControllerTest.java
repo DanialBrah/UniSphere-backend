@@ -98,7 +98,8 @@ class UserControllerTest extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.avatarUrl").value(avatarKey));
+                .andExpect(jsonPath("$.data.avatarUrl").value(
+                        "https://s3.us-west-004.backblazeb2.com/posts/" + avatarKey));
     }
 
     @Test
@@ -117,7 +118,8 @@ class UserControllerTest extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(setReq)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.avatarUrl").value("avatars/" + userId + "/avatar.jpg"));
+                .andExpect(jsonPath("$.data.avatarUrl").value(
+                        "https://s3.us-west-004.backblazeb2.com/posts/avatars/" + userId + "/avatar.jpg"));
 
         // Now remove it with empty string sentinel
         UpdateProfileRequest removeReq = new UpdateProfileRequest(
