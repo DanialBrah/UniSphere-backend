@@ -48,15 +48,16 @@ public class UserRateLimitFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
+        String path = RequestPath.of(request);
         boolean isPublicPath = RateLimitPaths.PUBLIC_PATHS.stream()
-                .anyMatch(pattern -> PATH_MATCHER.match(pattern, request.getServletPath()));
+                .anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
 
         if (!properties.isEnabled() || HttpMethod.OPTIONS.matches(request.getMethod()) || isPublicPath) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        RateLimitProperties.Limit limit = resolveLimit(request.getServletPath());
+        RateLimitProperties.Limit limit = LimitResolver.resolve(properties, path, properties.getApi());
         String key = "ratelimit:user:" + resolveSubject(request);
 
         if (!rateLimiterService.tryConsume(key, limit)) {
@@ -67,14 +68,6 @@ public class UserRateLimitFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
-    }
-
-    private RateLimitProperties.Limit resolveLimit(String servletPath) {
-        return properties.getOverrides().stream()
-                .filter(override -> PATH_MATCHER.match(override.getPathPattern(), servletPath))
-                .findFirst()
-                .<RateLimitProperties.Limit>map(override -> override)
-                .orElseGet(properties::getApi);
     }
 
     private String resolveSubject(HttpServletRequest request) {

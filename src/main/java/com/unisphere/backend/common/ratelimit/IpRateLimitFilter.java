@@ -42,19 +42,23 @@ public class IpRateLimitFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
+        String path = RequestPath.of(request);
         boolean isPublicPath = RateLimitPaths.PUBLIC_PATHS.stream()
-                .anyMatch(pattern -> PATH_MATCHER.match(pattern, request.getServletPath()));
+                .anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
 
         if (!properties.isEnabled()
                 || HttpMethod.OPTIONS.matches(request.getMethod())
                 || !isPublicPath
-                || "/api/health".equals(request.getServletPath())) {
+                || "/api/health".equals(path)) {
             filterChain.doFilter(request, response);
             return;
         }
 
         String key = "ratelimit:ip:" + ClientIpResolver.resolve(request);
-        RateLimitProperties.Limit limit = properties.getAuth();
+        // Overrides matter here as much as on the user tier: /auth/refresh is called on every page
+        // load for silent re-auth, so it cannot share the strict credential-guessing budget that
+        // login/register need — a whole dorm behind one NAT'd IP would exhaust it just by browsing.
+        RateLimitProperties.Limit limit = LimitResolver.resolve(properties, path, properties.getAuth());
 
         if (!rateLimiterService.tryConsume(key, limit)) {
             log.warn("IP rate limit exceeded for key {}", key);

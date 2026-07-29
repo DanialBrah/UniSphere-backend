@@ -175,24 +175,24 @@ public class AuthService {
 
     // ── Refresh ──────────────────────────────────────────────────────────────
 
-    public AuthResponse refresh(RefreshTokenRequest req) {
-        if (!jwtService.isRefreshToken(req.refreshToken())) {
+    public AuthResponse refresh(String refreshToken) {
+        if (!jwtService.isRefreshToken(refreshToken)) {
             throw new TokenExpiredException("Invalid token type — access tokens cannot be used to refresh");
         }
         String email;
         try {
-            email = normalizeEmail(jwtService.extractEmail(req.refreshToken()));
+            email = normalizeEmail(jwtService.extractEmail(refreshToken));
         } catch (Exception e) {
             throw new TokenExpiredException("Refresh token is invalid or expired");
         }
         User user = userRepository.findByEmail(email)
                 .orElseThrow(InvalidCredentialsException::new);
-        if (!jwtService.isRefreshTokenValid(req.refreshToken(), user)) {
+        if (!jwtService.isRefreshTokenValid(refreshToken, user)) {
             throw new TokenExpiredException("Refresh token is invalid or expired");
         }
         // Delete-first: the DELETE is authoritative — if it removes 0 rows the token was
         // already consumed (logout or a concurrent refresh), closing the TOCTOU window.
-        String tokenHash = hashToken(req.refreshToken());
+        String tokenHash = hashToken(refreshToken);
         if (refreshTokenRepository.deleteByTokenHash(tokenHash) == 0) {
             throw new TokenExpiredException("Refresh token has been revoked");
         }

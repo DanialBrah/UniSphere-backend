@@ -19,6 +19,11 @@ public final class RateLimitPaths {
             "/api/v1/auth/register/**",
             "/api/v1/auth/login",
             "/api/v1/auth/refresh",
+            // Logout authenticates via the HttpOnly refresh cookie it revokes, not the access
+            // token — otherwise a user whose access token had already expired could never revoke
+            // their refresh token server-side. Safe to expose: without the cookie the request
+            // revokes nothing, and SameSite keeps it off cross-site POSTs.
+            "/api/v1/auth/logout",
             "/api/v1/auth/forgot-password",
             "/api/v1/auth/reset-password",
             // Infrastructure
