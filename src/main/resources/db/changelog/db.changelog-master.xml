@@ -16,5 +16,6 @@
     <include file="changes/009-create-social-posting-tables.xml"         relativeToChangelogFile="true"/>
     <include file="changes/010-create-messaging-tables.xml"              relativeToChangelogFile="true"/>
     <include file="changes/011-create-notifications-table.xml"           relativeToChangelogFile="true"/>
+    <include file="changes/012-store-media-keys-not-urls.xml"            relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

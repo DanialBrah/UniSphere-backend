@@ -2,7 +2,7 @@ package com.unisphere.backend.identity.service;
 
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
 import com.unisphere.backend.common.exception.UserNotFoundException;
-import com.unisphere.backend.config.ObjectStorageConfig;
+import com.unisphere.backend.common.storage.MediaUrlResolver;
 import com.unisphere.backend.identity.dto.*;
 import com.unisphere.backend.identity.entity.*;
 import com.unisphere.backend.identity.mapper.UserMapper;
@@ -24,7 +24,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final UserMapper userMapper;
-    private final ObjectStorageConfig storageConfig;
+    private final MediaUrlResolver mediaUrlResolver;
 
     // ── Read ─────────────────────────────────────────────────────────────────
 
@@ -67,9 +67,9 @@ public class UserService {
             if (newAvatarKey != null && !newAvatarKey.startsWith("avatars/" + currentUser.getId() + "/")) {
                 throw new UnauthorizedActionException("Avatar key does not belong to the current user");
             }
-            String newAvatarUrl = newAvatarKey != null ? storageConfig.resolveMediaUrl(newAvatarKey) : null;
-            currentUser.setAvatarUrl(newAvatarUrl);
-            syncRoleAvatar(currentUser, newAvatarUrl);
+            // Persist the bare key; a presigned URL is minted per read (see changeset 012).
+            currentUser.setAvatarUrl(newAvatarKey);
+            syncRoleAvatar(currentUser, newAvatarKey);
         }
 
         if (currentUser instanceof Student s) {
@@ -155,7 +155,7 @@ public class UserService {
                 resolveDisplayName(user),
                 user.getEmail(),
                 user.getRole().name(),
-                user.getAvatarUrl()
+                mediaUrlResolver.toViewableUrl(user.getAvatarUrl())
         );
     }
 

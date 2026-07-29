@@ -247,7 +247,7 @@ public class PostSeeder implements CommandLineRunner {
     private void saveMedia(Post post, String key, MediaType type, int order) {
         PostMedia m = new PostMedia();
         m.setPost(post);
-        m.setMediaUrl(storageConfig.resolveMediaUrl(key));
+        m.setMediaKey(key);
         m.setMediaType(type);
         m.setSortOrder(order);
         postMediaRepository.save(m);

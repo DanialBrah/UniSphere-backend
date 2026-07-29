@@ -1,6 +1,7 @@
 package com.unisphere.backend.social.posting.service;
 
 import com.unisphere.backend.common.exception.CommentNotFoundException;
+import com.unisphere.backend.common.storage.MediaUrlResolver;
 import com.unisphere.backend.common.exception.PostNotFoundException;
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
 import com.unisphere.backend.identity.entity.Role;
@@ -28,6 +29,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -42,6 +47,7 @@ public class CommentService {
     private final PostRepository postRepository;
     private final UserRepository userRepository;
     private final CommentMapper commentMapper;
+    private final MediaUrlResolver mediaUrlResolver;
     private final RedisTemplate<String, Long> redisTemplate;
     private final NotificationService notificationService;
     private final PostAccessService postAccessService;
@@ -83,18 +89,18 @@ public class CommentService {
         if (!postAccessService.canView(post, currentUser)) {
             throw new PostNotFoundException(postId);
         }
-        return commentRepository
-                .findByPostIdAndParentCommentIdIsNullOrderByCreatedAtAsc(postId, pageable)
-                .map(c -> toCommentResponse(c, currentUser));
+        return toCommentResponses(
+                commentRepository.findByPostIdAndParentCommentIdIsNullOrderByCreatedAtAsc(postId, pageable),
+                currentUser);
     }
 
     @Transactional(readOnly = true)
     public Page<CommentResponse> getReplies(Long commentId, Pageable pageable, User currentUser) {
         Comment parent = findActiveComment(commentId);
         assertCanViewParentPost(parent, currentUser);
-        return commentRepository
-                .findByParentCommentIdOrderByCreatedAtAsc(commentId, pageable)
-                .map(c -> toCommentResponse(c, currentUser));
+        return toCommentResponses(
+                commentRepository.findByParentCommentIdOrderByCreatedAtAsc(commentId, pageable),
+                currentUser);
     }
 
     public CommentResponse updateComment(Long commentId, UpdateCommentRequest req, User currentUser) {
@@ -159,12 +165,47 @@ public class CommentService {
         return commentLikeRepository.countByCommentId(commentId);
     }
 
+    /**
+     * Page-level mapping: authors, like flags and reply counts are fetched once for the whole page
+     * rather than once per comment.
+     */
+    private Page<CommentResponse> toCommentResponses(Page<Comment> comments, User currentUser) {
+        PageContext ctx = loadPageContext(comments.getContent(), currentUser);
+        return comments.map(c -> toCommentResponse(c, currentUser, ctx));
+    }
+
+    private record PageContext(Map<Long, User> authors, Set<Long> likedCommentIds,
+                               Map<Long, Long> replyCounts) {}
+
+    private PageContext loadPageContext(List<Comment> comments, User currentUser) {
+        if (comments.isEmpty()) return new PageContext(Map.of(), Set.of(), Map.of());
+
+        Set<Long> commentIds = comments.stream().map(Comment::getId).collect(Collectors.toSet());
+        Set<Long> authorIds  = comments.stream().map(Comment::getUserId).collect(Collectors.toSet());
+
+        Map<Long, User> authors = userRepository.findAllById(authorIds).stream()
+                .collect(Collectors.toMap(User::getId, u -> u));
+
+        Map<Long, Long> replyCounts = commentRepository.countRepliesByParentIds(commentIds).stream()
+                .collect(Collectors.toMap(CommentRepository.CountByKey::getId,
+                                          CommentRepository.CountByKey::getTotal));
+
+        return new PageContext(
+                authors,
+                commentLikeRepository.findLikedCommentIds(currentUser.getId(), commentIds),
+                replyCounts);
+    }
+
     CommentResponse toCommentResponse(Comment comment, User currentUser) {
-        boolean liked = commentLikeRepository.existsByCommentIdAndUserId(comment.getId(), currentUser.getId());
-        long replyCount = commentRepository.countByParentCommentId(comment.getId());
+        return toCommentResponse(comment, currentUser, loadPageContext(List.of(comment), currentUser));
+    }
+
+    private CommentResponse toCommentResponse(Comment comment, User currentUser, PageContext ctx) {
+        boolean liked = ctx.likedCommentIds().contains(comment.getId());
+        long replyCount = ctx.replyCounts().getOrDefault(comment.getId(), 0L);
         long likesCount = comment.getLikesCount() + redisGetDelta(REDIS_COMMENT_LIKES + comment.getId());
 
-        PostAuthorResponse author = resolveAuthor(comment.getUserId());
+        PostAuthorResponse author = resolveAuthor(comment.getUserId(), ctx.authors());
         Comment enriched = new Comment();
         enriched.setId(comment.getId());
         enriched.setPostId(comment.getPostId());
@@ -177,10 +218,12 @@ public class CommentService {
         return commentMapper.toResponse(enriched, author, liked, replyCount);
     }
 
-    private PostAuthorResponse resolveAuthor(Long userId) {
-        return userRepository.findById(userId)
-                .map(u -> new PostAuthorResponse(u.getId(), resolveDisplayName(u), u.getAvatarUrl(), u.getRole().name()))
-                .orElse(new PostAuthorResponse(userId, "Unknown", null, "UNKNOWN"));
+    private PostAuthorResponse resolveAuthor(Long userId, Map<Long, User> authors) {
+        User author = authors.get(userId);
+        if (author == null) return new PostAuthorResponse(userId, "Unknown", null, "UNKNOWN");
+        // avatar_url holds a bare key since changeset 012 — it has to be signed to be fetchable.
+        return new PostAuthorResponse(author.getId(), resolveDisplayName(author),
+                mediaUrlResolver.toViewableUrl(author.getAvatarUrl()), author.getRole().name());
     }
 
     private String resolveDisplayName(User user) {

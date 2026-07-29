@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unisphere.backend.common.exception.MessageNotFoundException;
 import com.unisphere.backend.common.exception.NotConversationMemberException;
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
+import com.unisphere.backend.common.storage.MediaUrlResolver;
 import com.unisphere.backend.identity.entity.User;
 import com.unisphere.backend.identity.repository.UserRepository;
 import com.unisphere.backend.social.messaging.dto.request.MarkReadRequest;
@@ -31,7 +32,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -51,6 +55,7 @@ public class MessageService {
     private final MessageReadRepository messageReadRepository;
     private final ConversationMemberRepository memberRepository;
     private final UserRepository userRepository;
+    private final MediaUrlResolver mediaUrlResolver;
     private final StringRedisTemplate stringRedisTemplate;
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper;
@@ -109,9 +114,9 @@ public class MessageService {
             }
         }
 
-        return messageRepository
-                .findByConversationIdOrderByCreatedAtDesc(convId, pageable)
-                .map(this::toResponse);
+        Page<Message> page = messageRepository.findByConversationIdOrderByCreatedAtDesc(convId, pageable);
+        Map<Long, User> senders = loadSenders(page.getContent());
+        return page.map(m -> toResponse(m, senders));
     }
 
     public void deleteMessage(Long messageId, User currentUser) {
@@ -225,9 +230,23 @@ public class MessageService {
     }
 
     MessageResponse toResponse(Message message) {
-        User sender = userRepository.findById(message.getSenderId()).orElse(null);
+        return toResponse(message, loadSenders(List.of(message)));
+    }
+
+    /** Senders for a page of messages in one query, rather than one lookup per message. */
+    private Map<Long, User> loadSenders(List<Message> messages) {
+        Set<Long> senderIds = messages.stream()
+                .map(Message::getSenderId)
+                .collect(Collectors.toSet());
+        if (senderIds.isEmpty()) return Map.of();
+        return userRepository.findAllById(senderIds).stream()
+                .collect(Collectors.toMap(User::getId, u -> u));
+    }
+
+    private MessageResponse toResponse(Message message, Map<Long, User> senders) {
+        User sender = senders.get(message.getSenderId());
         String name = sender == null ? "Unknown" : ConversationService.resolveDisplayName(sender);
-        String avatar = sender == null ? null : sender.getAvatarUrl();
+        String avatar = sender == null ? null : mediaUrlResolver.toViewableUrl(sender.getAvatarUrl());
         return new MessageResponse(
                 message.getId(),
                 message.getConversationId(),

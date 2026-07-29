@@ -149,7 +149,9 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.postType").value("IMAGE"))
-                .andExpect(jsonPath("$.data.media[0].mediaUrl").value("https://s3.us-west-004.backblazeb2.com/posts/posts/1/photo.jpg"));
+                // PUBLIC posts are presigned too — a plain public URL only resolves on GCS
+                .andExpect(jsonPath("$.data.media[0].mediaUrl").value(
+                        "https://mock-storage.example.com/unisphere-posts/posts/1/test.jpg?get"));
     }
 
     // ── Feed ─────────────────────────────────────────────────────────────────
@@ -468,7 +470,7 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.media").isArray())
                 .andExpect(jsonPath("$.data.media[0].mediaUrl").value(
-                        "https://s3.us-west-004.backblazeb2.com/posts/posts/" + userId + "/new-photo.jpg"));
+                        "https://mock-storage.example.com/unisphere-posts/posts/1/test.jpg?get"));
     }
 
     @Test
@@ -770,7 +772,7 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
     // ── Presign fail-open ────────────────────────────────────────────────────
 
     @Test
-    void getPost_presignedGetFails_fallsBackToPlainUrlInsteadOf500() throws Exception {
+    void getPost_presignedGetFails_returnsNullMediaUrlInsteadOf500() throws Exception {
         String token = registerStudentAndGetToken("presign.fail@test.com", "MAT4009");
         Long userId = getUserId(token);
         CreatePostRequest.MediaItem mediaItem = new CreatePostRequest.MediaItem(
@@ -781,10 +783,12 @@ class PostControllerTest extends AbstractPostingIntegrationTest {
         Mockito.when(s3Presigner.presignGetObject(any(GetObjectPresignRequest.class)))
                 .thenThrow(new RuntimeException("Simulated signer failure"));
 
+        // Now that only the bare key is persisted there is no URL left to fall back to, so the
+        // field comes back null rather than a fabricated public URL that would 403 on Garage/B2.
+        // The request itself must still succeed — one bad key should not fail the whole response.
         mockMvc.perform(get(BASE + "/{postId}", postId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.media[0].mediaUrl").value(
-                        "https://s3.us-west-004.backblazeb2.com/posts/posts/" + userId + "/fail-photo.jpg"));
+                .andExpect(jsonPath("$.data.media[0].mediaUrl").doesNotExist());
     }
 }

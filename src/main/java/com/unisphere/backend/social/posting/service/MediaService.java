@@ -2,6 +2,8 @@ package com.unisphere.backend.social.posting.service;
 
 import com.unisphere.backend.common.exception.MediaUploadException;
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
+import com.unisphere.backend.common.storage.MediaStorageClient;
+import com.unisphere.backend.common.storage.MediaUrlResolver;
 import com.unisphere.backend.config.ObjectStorageConfig;
 import com.unisphere.backend.identity.entity.User;
 import com.unisphere.backend.social.posting.dto.request.MediaPresignRequest;
@@ -26,6 +28,7 @@ public class MediaService {
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "gif", "webp", "mp4", "mov");
 
     private final MediaStorageClient mediaStorageClient;
+    private final MediaUrlResolver mediaUrlResolver;
     private final ObjectStorageConfig storageConfig;
 
     @PostConstruct
@@ -64,7 +67,7 @@ public class MediaService {
             throw new MediaUploadException("Failed to upload file to object storage: " + ex.getMessage(), ex);
         }
 
-        String mediaUrl = storageConfig.resolveMediaUrl(mediaKey);
+        String mediaUrl = mediaUrlResolver.toViewableUrl(mediaKey);
         String mediaType = contentType.startsWith("video") ? "VIDEO" : "IMAGE";
         return new MediaUploadResponse(mediaKey, mediaUrl, mediaType);
     }

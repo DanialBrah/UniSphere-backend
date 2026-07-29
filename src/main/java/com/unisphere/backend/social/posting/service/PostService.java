@@ -2,7 +2,7 @@ package com.unisphere.backend.social.posting.service;
 
 import com.unisphere.backend.common.exception.PostNotFoundException;
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
-import com.unisphere.backend.config.ObjectStorageConfig;
+import com.unisphere.backend.common.storage.MediaUrlResolver;
 import com.unisphere.backend.identity.entity.Role;
 import com.unisphere.backend.identity.entity.User;
 import com.unisphere.backend.identity.repository.UserRepository;
@@ -27,6 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -45,8 +48,7 @@ public class PostService {
     private final PostMapper postMapper;
     private final RedisTemplate<String, Long> redisTemplate;
     private final NotificationService notificationService;
-    private final ObjectStorageConfig storageConfig;
-    private final MediaStorageClient mediaStorageClient;
+    private final MediaUrlResolver mediaUrlResolver;
     private final PostAccessService postAccessService;
 
     public PostResponse createPost(CreatePostRequest req, User currentUser) {
@@ -68,7 +70,7 @@ public class PostService {
             for (CreatePostRequest.MediaItem item : req.media()) {
                 PostMedia media = new PostMedia();
                 media.setPost(post);
-                media.setMediaUrl(storageConfig.resolveMediaUrl(item.mediaKey()));
+                media.setMediaKey(item.mediaKey());
                 media.setMediaType(resolveMediaType(item.mediaType()));
                 media.setSortOrder(order++);
                 post.getMedia().add(media);
@@ -97,9 +99,9 @@ public class PostService {
 
     @Transactional(readOnly = true)
     public Page<PostResponse> getFeed(Pageable pageable, User currentUser) {
-        return postRepository
-                .findByVisibilityOrderByCreatedAtDesc(PostVisibility.PUBLIC, pageable)
-                .map(post -> toPostResponse(post, currentUser));
+        return toPostResponses(
+                postRepository.findByVisibilityOrderByCreatedAtDesc(PostVisibility.PUBLIC, pageable),
+                currentUser);
     }
 
     @Transactional(readOnly = true)
@@ -116,9 +118,10 @@ public class PostService {
     public Page<PostResponse> getPostsByUser(Long userId, Pageable pageable, User currentUser) {
         boolean isOwnerOrAdmin = userId.equals(currentUser.getId()) || currentUser.getRole() == Role.ADMIN;
         boolean isFriend = isOwnerOrAdmin || postAccessService.isMutualFollow(currentUser.getId(), userId);
-        return postRepository
-                .findByUserIdVisibleTo(userId, isOwnerOrAdmin, postAccessService.viewerUniversityId(currentUser), isFriend, pageable)
-                .map(post -> toPostResponse(post, currentUser));
+        return toPostResponses(
+                postRepository.findByUserIdVisibleTo(userId, isOwnerOrAdmin,
+                        postAccessService.viewerUniversityId(currentUser), isFriend, pageable),
+                currentUser);
     }
 
     public PostResponse updatePost(Long postId, UpdatePostRequest req, User currentUser) {
@@ -142,7 +145,7 @@ public class PostService {
             for (UpdatePostRequest.MediaItem item : req.addMedia()) {
                 PostMedia m = new PostMedia();
                 m.setPost(post);
-                m.setMediaUrl(storageConfig.resolveMediaUrl(item.mediaKey()));
+                m.setMediaKey(item.mediaKey());
                 m.setMediaType(resolveMediaType(item.mediaType()));
                 m.setSortOrder(nextOrder++);
                 post.getMedia().add(m);
@@ -202,25 +205,28 @@ public class PostService {
     @Transactional(readOnly = true)
     public Page<PostResponse> getLikedPosts(Pageable pageable, User currentUser) {
         boolean isAdmin = currentUser.getRole() == Role.ADMIN;
-        return postRepository.findLikedPostsByUserId(
-                        currentUser.getId(), isAdmin, postAccessService.viewerUniversityId(currentUser), pageable)
-                .map(post -> toPostResponse(post, currentUser));
+        return toPostResponses(
+                postRepository.findLikedPostsByUserId(currentUser.getId(), isAdmin,
+                        postAccessService.viewerUniversityId(currentUser), pageable),
+                currentUser);
     }
 
     @Transactional(readOnly = true)
     public Page<PostResponse> getSavedPosts(Pageable pageable, User currentUser) {
         boolean isAdmin = currentUser.getRole() == Role.ADMIN;
-        return postRepository.findSavedPostsByUserId(
-                        currentUser.getId(), isAdmin, postAccessService.viewerUniversityId(currentUser), pageable)
-                .map(post -> toPostResponse(post, currentUser));
+        return toPostResponses(
+                postRepository.findSavedPostsByUserId(currentUser.getId(), isAdmin,
+                        postAccessService.viewerUniversityId(currentUser), pageable),
+                currentUser);
     }
 
     @Transactional(readOnly = true)
     public Page<PostResponse> searchPosts(String query, Pageable pageable, User currentUser) {
         boolean isAdmin = currentUser.getRole() == Role.ADMIN;
-        return postRepository.searchFullText(
-                        query, currentUser.getId(), isAdmin, postAccessService.viewerUniversityId(currentUser), pageable)
-                .map(post -> toPostResponse(post, currentUser));
+        return toPostResponses(
+                postRepository.searchFullText(query, currentUser.getId(), isAdmin,
+                        postAccessService.viewerUniversityId(currentUser), pageable),
+                currentUser);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -236,42 +242,69 @@ public class PostService {
         }
     }
 
-    private PostMediaResponse resolveViewableMedia(PostMediaResponse m, PostVisibility visibility) {
-        if (visibility == PostVisibility.PUBLIC) return m;
+    /**
+     * Page-level mapping: authors are batch-loaded once for the whole page. Mapping post-by-post
+     * would issue one author lookup per post, so a 20-post feed costs 20 extra round-trips.
+     */
+    private Page<PostResponse> toPostResponses(Page<Post> posts, User currentUser) {
+        PageContext ctx = loadPageContext(posts.getContent(), currentUser);
+        return posts.map(post -> toPostResponse(post, currentUser, ctx));
+    }
 
-        String prefix = storageConfig.getEndpoint() + "/" + storageConfig.getBucket().getPosts() + "/";
-        if (!m.mediaUrl().startsWith(prefix)) {
-            // Media predates a provider swap — can't be correctly presigned against the currently
-            // active provider's credentials. Falls back to the plain stored URL (no worse than today).
-            return m;
-        }
-        String key = m.mediaUrl().substring(prefix.length());
-        try {
-            String presigned = mediaStorageClient.presignGetUrl(
-                    storageConfig.getBucket().getPosts(), key, storageConfig.getPresignGetExpiryMinutes());
-            return new PostMediaResponse(m.id(), presigned, m.mediaType(), m.sortOrder());
-        } catch (Exception ex) {
-            log.warn("Presigned GET failed for media {}, falling back to stored URL: {}", m.id(), ex.getMessage());
-            return m;
-        }
+    /**
+     * Everything a page of posts needs that would otherwise be fetched per post: authors, the
+     * viewer's like/save flags, and comment counts. Four queries for the page instead of four
+     * per post.
+     */
+    private record PageContext(Map<Long, User> authors, Set<Long> likedPostIds,
+                               Set<Long> savedPostIds, Map<Long, Long> commentCounts) {}
+
+    private PageContext loadPageContext(List<Post> posts, User currentUser) {
+        if (posts.isEmpty()) return new PageContext(Map.of(), Set.of(), Set.of(), Map.of());
+
+        Set<Long> postIds = posts.stream().map(Post::getId).collect(Collectors.toSet());
+        Long viewerId = currentUser.getId();
+
+        Map<Long, Long> commentCounts = commentRepository.countTopLevelByPostIds(postIds).stream()
+                .collect(Collectors.toMap(CommentRepository.CountByKey::getId,
+                                          CommentRepository.CountByKey::getTotal));
+
+        return new PageContext(
+                loadAuthors(posts),
+                postLikeRepository.findLikedPostIds(viewerId, postIds),
+                postSaveRepository.findSavedPostIds(viewerId, postIds),
+                commentCounts);
+    }
+
+    private Map<Long, User> loadAuthors(List<Post> posts) {
+        Set<Long> authorIds = posts.stream()
+                .map(Post::getUserId)
+                .collect(Collectors.toSet());
+        if (authorIds.isEmpty()) return Map.of();
+        return userRepository.findAllById(authorIds).stream()
+                .collect(Collectors.toMap(User::getId, u -> u));
     }
 
     PostResponse toPostResponse(Post post, User currentUser) {
-        Long userId = currentUser.getId();
-        boolean liked = postLikeRepository.existsByPostIdAndUserId(post.getId(), userId);
-        boolean saved = postSaveRepository.existsByUserIdAndPostId(userId, post.getId());
-        long commentCount = commentRepository.countByPostIdAndParentCommentIdIsNull(post.getId());
+        return toPostResponse(post, currentUser, loadPageContext(List.of(post), currentUser));
+    }
 
+    private PostResponse toPostResponse(Post post, User currentUser, PageContext ctx) {
+        boolean liked = ctx.likedPostIds().contains(post.getId());
+        boolean saved = ctx.savedPostIds().contains(post.getId());
+        long commentCount = ctx.commentCounts().getOrDefault(post.getId(), 0L);
+
+        // Presigning happens in PostMapper — every post, not just restricted ones, because a plain
+        // public URL only resolves on GCS (Garage has no anonymous access, B2 buckets are private).
         List<PostMediaResponse> media = post.getMedia().stream()
                 .map(postMapper::toMediaResponse)
-                .map(m -> resolveViewableMedia(m, post.getVisibility()))
                 .toList();
 
         List<Long> taggedIds = post.getTags().stream()
                 .map(PostTag::getTaggedUserId)
                 .toList();
 
-        PostAuthorResponse author = resolveAuthor(post.getUserId());
+        PostAuthorResponse author = resolveAuthor(post.getUserId(), ctx.authors());
 
         long likesCount = post.getLikesCount() + redisGetDelta(REDIS_POST_LIKES + post.getId());
         long viewsCount = post.getViewsCount() + redisGetDelta(REDIS_POST_VIEWS + post.getId());
@@ -284,10 +317,11 @@ public class PostService {
         );
     }
 
-    private PostAuthorResponse resolveAuthor(Long userId) {
-        return userRepository.findById(userId)
-                .map(u -> new PostAuthorResponse(u.getId(), resolveDisplayName(u), u.getAvatarUrl(), u.getRole().name()))
-                .orElse(new PostAuthorResponse(userId, "Unknown", null, "UNKNOWN"));
+    private PostAuthorResponse resolveAuthor(Long userId, Map<Long, User> authors) {
+        User author = authors.get(userId);
+        if (author == null) return new PostAuthorResponse(userId, "Unknown", null, "UNKNOWN");
+        return new PostAuthorResponse(author.getId(), resolveDisplayName(author),
+                mediaUrlResolver.toViewableUrl(author.getAvatarUrl()), author.getRole().name());
     }
 
     private String resolveDisplayName(User user) {

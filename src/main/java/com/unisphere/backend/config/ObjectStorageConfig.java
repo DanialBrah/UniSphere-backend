@@ -40,7 +40,13 @@ public class ObjectStorageConfig {
 
     private Bucket bucket = new Bucket();
     private int presignExpiryMinutes = 5;
-    private int presignGetExpiryMinutes = 15;
+
+    /**
+     * Lifetime of a presigned GET. Media URLs are embedded in feed responses, so this has to
+     * outlive however long a client may hold that JSON — too short and cached responses come back
+     * with URLs that have already expired.
+     */
+    private int presignGetExpiryMinutes = 60;
 
     @Getter
     @Setter
@@ -48,10 +54,9 @@ public class ObjectStorageConfig {
         private String posts = "posts";
     }
 
-    /** Builds the absolute, publicly-fetchable URL for a stored object key. */
-    public String resolveMediaUrl(String key) {
-        return endpoint + "/" + bucket.getPosts() + "/" + key;
-    }
+    // No resolveMediaUrl() here by design: a plain public URL only resolves on GCS. Garage rejects
+    // anonymous access outright and B2 buckets are private, so reads go through
+    // MediaUrlResolver (presigned GET), which works on all three. See changeset 012.
 
     private StaticCredentialsProvider credentials() {
         return StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKeyId, secretAccessKey));

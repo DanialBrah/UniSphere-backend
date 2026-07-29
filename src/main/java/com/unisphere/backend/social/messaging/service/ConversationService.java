@@ -3,6 +3,7 @@ package com.unisphere.backend.social.messaging.service;
 import com.unisphere.backend.common.exception.ConversationNotFoundException;
 import com.unisphere.backend.common.exception.NotConversationMemberException;
 import com.unisphere.backend.common.exception.UnauthorizedActionException;
+import com.unisphere.backend.common.storage.MediaUrlResolver;
 import com.unisphere.backend.identity.entity.*;
 import com.unisphere.backend.identity.repository.UserRepository;
 import com.unisphere.backend.social.messaging.dto.request.AddMemberRequest;
@@ -25,7 +26,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional
@@ -36,6 +42,7 @@ public class ConversationService {
     private final ConversationMemberRepository memberRepository;
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
+    private final MediaUrlResolver mediaUrlResolver;
 
     public ConversationResponse createConversation(CreateConversationRequest req, User currentUser) {
         if (req.type() == ConversationType.DIRECT) {
@@ -56,9 +63,9 @@ public class ConversationService {
 
     @Transactional(readOnly = true)
     public Page<ConversationResponse> getInbox(User currentUser, Pageable pageable) {
-        return conversationRepository
-                .findAllByMemberId(currentUser.getId(), pageable)
-                .map(c -> toResponse(c, currentUser.getId()));
+        return toResponses(
+                conversationRepository.findAllByMemberId(currentUser.getId(), pageable),
+                currentUser.getId());
     }
 
     @Transactional(readOnly = true)
@@ -74,11 +81,11 @@ public class ConversationService {
         conversationRepository.findById(convId)
                 .orElseThrow(() -> new ConversationNotFoundException(convId));
         assertMembership(convId, currentUser.getId());
-        return memberRepository.findByConversationId(convId).stream()
-                .map(m -> {
-                    User u = userRepository.findById(m.getUserId()).orElse(null);
-                    return toMemberSummary(m, u);
-                })
+        List<ConversationMember> members = memberRepository.findByConversationId(convId);
+        Map<Long, User> users = loadUsers(
+                members.stream().map(ConversationMember::getUserId).collect(Collectors.toSet()));
+        return members.stream()
+                .map(m -> toMemberSummary(m, users.get(m.getUserId())))
                 .toList();
     }
 
@@ -172,19 +179,61 @@ public class ConversationService {
         return toResponse(conv, currentUser.getId());
     }
 
+    /**
+     * Page-level mapping. Rendering conversations one at a time costs a members query, a user
+     * lookup per member, a last-message query and a sender lookup for every row; batching turns
+     * the whole page into three queries.
+     */
+    Page<ConversationResponse> toResponses(Page<Conversation> conversations, Long viewerId) {
+        PageContext ctx = loadPageContext(conversations.getContent());
+        return conversations.map(c -> toResponse(c, viewerId, ctx));
+    }
+
+    private record PageContext(Map<Long, User> users,
+                               Map<Long, List<ConversationMember>> membersByConversation,
+                               Map<Long, Message> lastMessageByConversation) {}
+
+    private PageContext loadPageContext(List<Conversation> conversations) {
+        if (conversations.isEmpty()) return new PageContext(Map.of(), Map.of(), Map.of());
+
+        Set<Long> convIds = conversations.stream().map(Conversation::getId).collect(Collectors.toSet());
+
+        Map<Long, List<ConversationMember>> membersByConversation =
+                memberRepository.findByConversationIdIn(convIds).stream()
+                        .collect(Collectors.groupingBy(ConversationMember::getConversationId));
+
+        Map<Long, Message> lastMessageByConversation =
+                messageRepository.findLatestPerConversation(convIds).stream()
+                        .collect(Collectors.toMap(Message::getConversationId, m -> m));
+
+        Set<Long> userIds = new HashSet<>();
+        membersByConversation.values()
+                .forEach(list -> list.forEach(m -> userIds.add(m.getUserId())));
+        lastMessageByConversation.values()
+                .forEach(m -> userIds.add(m.getSenderId()));
+
+        return new PageContext(loadUsers(userIds), membersByConversation, lastMessageByConversation);
+    }
+
+    private Map<Long, User> loadUsers(Collection<Long> userIds) {
+        if (userIds.isEmpty()) return Map.of();
+        return userRepository.findAllById(userIds).stream()
+                .collect(Collectors.toMap(User::getId, u -> u));
+    }
+
     ConversationResponse toResponse(Conversation conv, Long viewerId) {
-        List<ConversationMember> members = memberRepository.findByConversationId(conv.getId());
-        List<MemberSummary> memberSummaries = members.stream()
-                .map(m -> {
-                    User u = userRepository.findById(m.getUserId()).orElse(null);
-                    return toMemberSummary(m, u);
-                })
+        return toResponse(conv, viewerId, loadPageContext(List.of(conv)));
+    }
+
+    private ConversationResponse toResponse(Conversation conv, Long viewerId, PageContext ctx) {
+        List<MemberSummary> memberSummaries = ctx.membersByConversation()
+                .getOrDefault(conv.getId(), List.of()).stream()
+                .map(m -> toMemberSummary(m, ctx.users().get(m.getUserId())))
                 .toList();
 
-        Message lastMsg = messageRepository
-                .findTopByConversationIdOrderByCreatedAtDesc(conv.getId())
-                .orElse(null);
-        MessageResponse lastMessageResponse = lastMsg == null ? null : toMessageResponse(lastMsg);
+        Message lastMsg = ctx.lastMessageByConversation().get(conv.getId());
+        MessageResponse lastMessageResponse =
+                lastMsg == null ? null : toMessageResponse(lastMsg, ctx.users());
 
         return new ConversationResponse(
                 conv.getId(),
@@ -200,13 +249,14 @@ public class ConversationService {
         if (user == null) {
             return new MemberSummary(member.getUserId(), "Unknown", null, member.getRole());
         }
-        return new MemberSummary(user.getId(), resolveDisplayName(user), user.getAvatarUrl(), member.getRole());
+        return new MemberSummary(user.getId(), resolveDisplayName(user),
+                mediaUrlResolver.toViewableUrl(user.getAvatarUrl()), member.getRole());
     }
 
-    private MessageResponse toMessageResponse(Message msg) {
-        User sender = userRepository.findById(msg.getSenderId()).orElse(null);
+    private MessageResponse toMessageResponse(Message msg, Map<Long, User> users) {
+        User sender = users.get(msg.getSenderId());
         String name = sender == null ? "Unknown" : resolveDisplayName(sender);
-        String avatar = sender == null ? null : sender.getAvatarUrl();
+        String avatar = sender == null ? null : mediaUrlResolver.toViewableUrl(sender.getAvatarUrl());
         return new MessageResponse(
                 msg.getId(), msg.getConversationId(), msg.getSenderId(),
                 name, avatar, msg.getContent(), msg.getMsgType(),

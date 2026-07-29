@@ -11,6 +11,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -98,8 +100,11 @@ class UserControllerTest extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.avatarUrl").value(
-                        "https://s3.us-west-004.backblazeb2.com/posts/" + avatarKey));
+                // The bare key is what gets persisted; the response carries a presigned GET minted
+                // per read, so assert on the stable prefix rather than the time-varying signature.
+                .andExpect(jsonPath("$.data.avatarUrl", startsWith(
+                        "https://s3.us-west-004.backblazeb2.com/posts/" + avatarKey + "?")))
+                .andExpect(jsonPath("$.data.avatarUrl", containsString("X-Amz-Signature=")));
     }
 
     @Test
@@ -118,8 +123,8 @@ class UserControllerTest extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(setReq)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.avatarUrl").value(
-                        "https://s3.us-west-004.backblazeb2.com/posts/avatars/" + userId + "/avatar.jpg"));
+                .andExpect(jsonPath("$.data.avatarUrl", startsWith(
+                        "https://s3.us-west-004.backblazeb2.com/posts/avatars/" + userId + "/avatar.jpg?")));
 
         // Now remove it with empty string sentinel
         UpdateProfileRequest removeReq = new UpdateProfileRequest(

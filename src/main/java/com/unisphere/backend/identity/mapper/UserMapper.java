@@ -1,5 +1,6 @@
 package com.unisphere.backend.identity.mapper;
 
+import com.unisphere.backend.common.storage.MediaUrlResolver;
 import com.unisphere.backend.identity.dto.*;
 import com.unisphere.backend.identity.entity.*;
 import org.mapstruct.Mapper;
@@ -9,7 +10,7 @@ import org.mapstruct.Mapping;
  * Multi-source MapStruct mapper: each method takes the base User
  * (for common fields) plus the role-specific entity (for profile fields).
  */
-@Mapper(componentModel = "spring")
+@Mapper(componentModel = "spring", uses = MediaUrlResolver.class)
 public interface UserMapper {
 
     @Mapping(target = "id",         source = "user.id")
@@ -17,7 +18,7 @@ public interface UserMapper {
     @Mapping(target = "role",       expression = "java(user.getRole().name())")
     @Mapping(target = "status",     expression = "java(user.getStatus().name())")
     @Mapping(target = "isVerified", source = "user.verified")
-    @Mapping(target = "avatarUrl",  source = "user.avatarUrl")
+    @Mapping(target = "avatarUrl",  source = "user.avatarUrl", qualifiedByName = "toViewableUrl")
     @Mapping(target = "phone",      source = "user.phone")
     @Mapping(target = "createdAt",  source = "user.createdAt")
     @Mapping(target = "fullName",         source = "student.fullName")
@@ -36,7 +37,7 @@ public interface UserMapper {
     @Mapping(target = "role",       expression = "java(user.getRole().name())")
     @Mapping(target = "status",     expression = "java(user.getStatus().name())")
     @Mapping(target = "isVerified", source = "user.verified")
-    @Mapping(target = "avatarUrl",  source = "user.avatarUrl")
+    @Mapping(target = "avatarUrl",  source = "user.avatarUrl", qualifiedByName = "toViewableUrl")
     @Mapping(target = "phone",      source = "user.phone")
     @Mapping(target = "createdAt",  source = "user.createdAt")
     @Mapping(target = "fullName",         source = "alumni.fullName")
@@ -54,11 +55,11 @@ public interface UserMapper {
     @Mapping(target = "role",       expression = "java(user.getRole().name())")
     @Mapping(target = "status",     expression = "java(user.getStatus().name())")
     @Mapping(target = "isVerified", source = "user.verified")
-    @Mapping(target = "avatarUrl",  source = "user.avatarUrl")
+    @Mapping(target = "avatarUrl",  source = "user.avatarUrl", qualifiedByName = "toViewableUrl")
     @Mapping(target = "phone",      source = "user.phone")
     @Mapping(target = "createdAt",  source = "user.createdAt")
     @Mapping(target = "companyName",    source = "employer.companyName")
-    @Mapping(target = "companyLogoUrl", source = "employer.companyLogoUrl")
+    @Mapping(target = "companyLogoUrl", source = "employer.companyLogoUrl", qualifiedByName = "toViewableUrl")
     @Mapping(target = "industry",       source = "employer.industry")
     @Mapping(target = "companySize",    source = "employer.companySize")
     @Mapping(target = "websiteUrl",     source = "employer.websiteUrl")
@@ -71,12 +72,12 @@ public interface UserMapper {
     @Mapping(target = "role",       expression = "java(user.getRole().name())")
     @Mapping(target = "status",     expression = "java(user.getStatus().name())")
     @Mapping(target = "isVerified", source = "user.verified")
-    @Mapping(target = "avatarUrl",  source = "user.avatarUrl")
+    @Mapping(target = "avatarUrl",  source = "user.avatarUrl", qualifiedByName = "toViewableUrl")
     @Mapping(target = "phone",      source = "user.phone")
     @Mapping(target = "createdAt",  source = "user.createdAt")
     @Mapping(target = "name",               source = "university.name")
     @Mapping(target = "shortName",          source = "university.shortName")
-    @Mapping(target = "logoUrl",            source = "university.logoUrl")
+    @Mapping(target = "logoUrl",            source = "university.logoUrl", qualifiedByName = "toViewableUrl")
     @Mapping(target = "websiteUrl",         source = "university.websiteUrl")
     @Mapping(target = "address",            source = "university.address")
     @Mapping(target = "country",            source = "university.country")
@@ -89,13 +90,13 @@ public interface UserMapper {
     @Mapping(target = "role",       expression = "java(user.getRole().name())")
     @Mapping(target = "status",     expression = "java(user.getStatus().name())")
     @Mapping(target = "isVerified", source = "user.verified")
-    @Mapping(target = "avatarUrl",  source = "user.avatarUrl")
+    @Mapping(target = "avatarUrl",  source = "user.avatarUrl", qualifiedByName = "toViewableUrl")
     @Mapping(target = "phone",      source = "user.phone")
     @Mapping(target = "createdAt",  source = "user.createdAt")
     @Mapping(target = "name",            source = "club.name")
     @Mapping(target = "universityId",    source = "club.universityId")
     @Mapping(target = "description",     source = "club.description")
-    @Mapping(target = "logoUrl",         source = "club.logoUrl")
+    @Mapping(target = "logoUrl",         source = "club.logoUrl", qualifiedByName = "toViewableUrl")
     @Mapping(target = "category",        source = "club.category")
     @Mapping(target = "isOfficial",      source = "club.official")
     ClubProfileResponse toClubProfile(User user, Club club);
@@ -105,7 +106,7 @@ public interface UserMapper {
     @Mapping(target = "role",       expression = "java(user.getRole().name())")
     @Mapping(target = "status",     expression = "java(user.getStatus().name())")
     @Mapping(target = "isVerified", source = "user.verified")
-    @Mapping(target = "avatarUrl",  source = "user.avatarUrl")
+    @Mapping(target = "avatarUrl",  source = "user.avatarUrl", qualifiedByName = "toViewableUrl")
     @Mapping(target = "phone",      source = "user.phone")
     @Mapping(target = "createdAt",  source = "user.createdAt")
     @Mapping(target = "fullName",   source = "admin.fullName")

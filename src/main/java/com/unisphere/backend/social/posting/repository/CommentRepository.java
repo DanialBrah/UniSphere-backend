@@ -9,6 +9,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.List;
+
 public interface CommentRepository extends JpaRepository<Comment, Long> {
 
     Page<Comment> findByPostIdAndParentCommentIdIsNullOrderByCreatedAtAsc(Long postId, Pageable pageable);
@@ -18,6 +21,31 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
     long countByPostIdAndParentCommentIdIsNull(Long postId);
 
     long countByParentCommentId(Long parentCommentId);
+
+    /**
+     * Batched form of {@link #countByPostIdAndParentCommentIdIsNull}. Posts with no comments are
+     * simply absent from the result rather than reported as zero — callers default them.
+     */
+    @Query("""
+            SELECT c.postId AS id, COUNT(c) AS total FROM Comment c
+            WHERE c.postId IN :postIds AND c.parentCommentId IS NULL
+            GROUP BY c.postId
+            """)
+    List<CountByKey> countTopLevelByPostIds(@Param("postIds") Collection<Long> postIds);
+
+    /** Batched form of {@link #countByParentCommentId}. */
+    @Query("""
+            SELECT c.parentCommentId AS id, COUNT(c) AS total FROM Comment c
+            WHERE c.parentCommentId IN :parentIds
+            GROUP BY c.parentCommentId
+            """)
+    List<CountByKey> countRepliesByParentIds(@Param("parentIds") Collection<Long> parentIds);
+
+    /** Projection for the grouped counts above. */
+    interface CountByKey {
+        Long getId();
+        long getTotal();
+    }
 
     @Modifying
     @Transactional

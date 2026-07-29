@@ -21,8 +21,9 @@ public class PostMedia {
     @JoinColumn(name = "post_id", nullable = false)
     private Post post;
 
-    @Column(name = "media_url", nullable = false, length = 500)
-    private String mediaUrl;
+    /** Bare object key (e.g. posts/9/uuid.jpeg) — never a resolved URL; see changeset 012. */
+    @Column(name = "media_key", nullable = false, length = 500)
+    private String mediaKey;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "media_type", nullable = false, length = 5)

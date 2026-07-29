@@ -1,4 +1,4 @@
-package com.unisphere.backend.social.posting.service;
+package com.unisphere.backend.common.storage;
 
 import com.unisphere.backend.common.exception.MediaUploadException;
 import lombok.RequiredArgsConstructor;

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+        Store object keys, never resolved URLs — the same rule changeset 004 applied to
+        verification_documents, now applied to post media and avatars.
+
+        A resolved URL bakes in the endpoint of whichever provider was active when the row was
+        written, so the row is orphaned by a provider swap. Worse, the plain public URL only
+        resolves on GCS: Garage rejects anonymous access outright ("Garage does not support
+        anonymous access yet") and B2 buckets are private. Presigning at read time is the only
+        access path that works on all three, and it needs a bare key to sign.
+
+        The UPDATEs recover the key from existing URLs by taking everything after the LAST
+        '/posts/' or '/avatars/' segment. That is deliberate rather than stripping a hardcoded
+        endpoint: the three buckets have different names (posts, unisphere-posts,
+        unisphere-media-bucket) and the key prefix repeats the bucket name in the Garage case
+        ('.../posts/posts/9/uuid.jpeg'), so anchoring on the last occurrence is what survives all
+        three layouts. Rows already holding a bare key are left alone by the LIKE 'http%' guard.
+    -->
+
+    <changeSet id="012-01-rename-post-media-url-to-key" author="unisphere">
+        <renameColumn
+                tableName="post_media"
+                oldColumnName="media_url"
+                newColumnName="media_key"
+                columnDataType="VARCHAR(500)"/>
+    </changeSet>
+
+    <changeSet id="012-02-backfill-post-media-keys" author="unisphere">
+        <sql>
+            UPDATE post_media
+            SET media_key = CONCAT('posts/', SUBSTRING_INDEX(media_key, '/posts/', -1))
+            WHERE media_key LIKE 'http%/posts/%';
+        </sql>
+    </changeSet>
+
+    <changeSet id="012-03-backfill-avatar-keys" author="unisphere">
+        <!--
+            Column names stay *_url here. The request contract already carries a key
+            (UpdateProfileRequest.avatarUrl is validated as 'avatars/{userId}/...'), so renaming
+            four columns across three role tables buys nothing the comment above doesn't already
+            record. The stored value is a key regardless of the column's name.
+        -->
+        <sql>
+            UPDATE users
+            SET avatar_url = CONCAT('avatars/', SUBSTRING_INDEX(avatar_url, '/avatars/', -1))
+            WHERE avatar_url LIKE 'http%/avatars/%';
+        </sql>
+        <sql>
+            UPDATE employers
+            SET company_logo_url = CONCAT('avatars/', SUBSTRING_INDEX(company_logo_url, '/avatars/', -1))
+            WHERE company_logo_url LIKE 'http%/avatars/%';
+        </sql>
+        <sql>
+            UPDATE universities
+            SET logo_url = CONCAT('avatars/', SUBSTRING_INDEX(logo_url, '/avatars/', -1))
+            WHERE logo_url LIKE 'http%/avatars/%';
+        </sql>
+        <sql>
+            UPDATE clubs
+            SET logo_url = CONCAT('avatars/', SUBSTRING_INDEX(logo_url, '/avatars/', -1))
+            WHERE logo_url LIKE 'http%/avatars/%';
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>
