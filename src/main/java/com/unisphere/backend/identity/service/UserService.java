@@ -7,6 +7,7 @@ import com.unisphere.backend.identity.dto.*;
 import com.unisphere.backend.identity.entity.*;
 import com.unisphere.backend.identity.mapper.UserMapper;
 import com.unisphere.backend.identity.repository.UserRepository;
+import com.unisphere.backend.social.follow.repository.FollowRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -14,7 +15,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,6 +31,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final UserMapper userMapper;
     private final MediaUrlResolver mediaUrlResolver;
+    private final FollowRepository followRepository;
 
     // ── Read ─────────────────────────────────────────────────────────────────
 
@@ -45,7 +52,31 @@ public class UserService {
         Page<Long> ids = userRepository.searchIds(q.trim(), currentUser.getId(), pageable);
         Map<Long, User> byId = userRepository.findAllById(ids.getContent())
                 .stream().collect(Collectors.toMap(User::getId, u -> u));
-        return ids.map(id -> toSummary(byId.get(id)));
+        Set<Long> followed = followedIdsAmong(currentUser.getId(), ids.getContent());
+        return ids.map(id -> toSummary(byId.get(id), followed));
+    }
+
+    /**
+     * Maps user IDs to summaries <em>preserving the given order</em> — callers like the
+     * recommendation query rank their IDs deliberately, and {@code findAllById} does not
+     * guarantee ordering. Follow state for the whole batch is resolved in one query.
+     */
+    @Transactional(readOnly = true)
+    public List<UserSummaryResponse> summariesFor(List<Long> userIds, User currentUser) {
+        if (userIds.isEmpty()) return List.of();
+        Map<Long, User> byId = userRepository.findAllById(userIds)
+                .stream().collect(Collectors.toMap(User::getId, u -> u));
+        Set<Long> followed = followedIdsAmong(currentUser.getId(), userIds);
+        return userIds.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .map(user -> toSummary(user, followed))
+                .toList();
+    }
+
+    private Set<Long> followedIdsAmong(Long followerId, Collection<Long> candidateIds) {
+        if (candidateIds.isEmpty()) return Set.of();
+        return new HashSet<>(followRepository.findFollowedIdsAmong(followerId, candidateIds));
     }
 
     // Admin: list all users with optional role / status filters
@@ -148,15 +179,27 @@ public class UserService {
         };
     }
 
-    private UserSummaryResponse toSummary(User user) {
+    private UserSummaryResponse toSummary(User user, Set<Long> followedIds) {
         if (user == null) return null;
         return new UserSummaryResponse(
                 user.getId(),
                 resolveDisplayName(user),
                 user.getEmail(),
                 user.getRole().name(),
-                mediaUrlResolver.toViewableUrl(user.getAvatarUrl())
+                mediaUrlResolver.toViewableUrl(user.getAvatarUrl()),
+                followedIds.contains(user.getId())
         );
+    }
+
+    /**
+     * The requester's university, or null. Lives on the role-specific tables under JOINED
+     * inheritance, so employers/universities/admins simply have none.
+     */
+    public static Long universityIdOf(User user) {
+        if (user instanceof Student s) return s.getUniversityId();
+        if (user instanceof Alumni a)  return a.getUniversityId();
+        if (user instanceof Club c)    return c.getUniversityId();
+        return null;
     }
 
     private void syncRoleAvatar(User user, String url) {
@@ -165,7 +208,8 @@ public class UserService {
         else if (user instanceof Club c) c.setLogoUrl(url);
     }
 
-    static String resolveDisplayName(User user) {
+    /** Display name for any role — public so other modules (e.g. notifications) can label actors. */
+    public static String resolveDisplayName(User user) {
         if (user instanceof Student s)    return s.getFullName();
         if (user instanceof Alumni a)     return a.getFullName();
         if (user instanceof Admin a)      return a.getFullName();
