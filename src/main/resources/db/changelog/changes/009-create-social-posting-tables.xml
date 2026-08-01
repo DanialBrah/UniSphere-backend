@@ -53,6 +53,12 @@
         <createIndex tableName="posts" indexName="idx_posts_university">
             <column name="university_id"/>
         </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="posts"/>
+        </rollback>
     </changeSet>
 
     <!-- FULLTEXT index must be raw SQL — Liquibase has no direct element for it -->
@@ -90,6 +96,12 @@
         <createIndex tableName="post_media" indexName="idx_post_media_post">
             <column name="post_id"/>
         </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="post_media"/>
+        </rollback>
     </changeSet>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -110,6 +122,12 @@
 
         <addUniqueConstraint tableName="post_tags" columnNames="post_id,tagged_user_id"
                              constraintName="uq_post_tags"/>
+        <!-- Explicit rollback: MySQL can use the unique index to back a foreign key
+             and then refuses to drop it. Dropping the table removes the constraint
+             and the index together. -->
+        <rollback>
+            <dropTable tableName="post_tags"/>
+        </rollback>
     </changeSet>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -150,6 +168,12 @@
         <createIndex tableName="comments" indexName="idx_comments_parent">
             <column name="parent_comment_id"/>
         </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="comments"/>
+        </rollback>
     </changeSet>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -173,6 +197,12 @@
 
         <addUniqueConstraint tableName="post_likes" columnNames="post_id,user_id"
                              constraintName="uq_post_likes"/>
+        <!-- Explicit rollback: MySQL can use the unique index to back a foreign key
+             and then refuses to drop it. Dropping the table removes the constraint
+             and the index together. -->
+        <rollback>
+            <dropTable tableName="post_likes"/>
+        </rollback>
     </changeSet>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -196,6 +226,12 @@
 
         <addUniqueConstraint tableName="comment_likes" columnNames="comment_id,user_id"
                              constraintName="uq_comment_likes"/>
+        <!-- Explicit rollback: MySQL can use the unique index to back a foreign key
+             and then refuses to drop it. Dropping the table removes the constraint
+             and the index together. -->
+        <rollback>
+            <dropTable tableName="comment_likes"/>
+        </rollback>
     </changeSet>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -219,6 +255,12 @@
 
         <addUniqueConstraint tableName="post_saves" columnNames="user_id,post_id"
                              constraintName="uq_post_saves"/>
+        <!-- Explicit rollback: MySQL can use the unique index to back a foreign key
+             and then refuses to drop it. Dropping the table removes the constraint
+             and the index together. -->
+        <rollback>
+            <dropTable tableName="post_saves"/>
+        </rollback>
     </changeSet>
 
 </databaseChangeLog>

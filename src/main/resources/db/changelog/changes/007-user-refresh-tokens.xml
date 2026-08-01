@@ -43,6 +43,12 @@
         <createIndex tableName="user_refresh_tokens" indexName="idx_urt_expires_at">
             <column name="expires_at"/>
         </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="user_refresh_tokens"/>
+        </rollback>
     </changeSet>
 
 </databaseChangeLog>

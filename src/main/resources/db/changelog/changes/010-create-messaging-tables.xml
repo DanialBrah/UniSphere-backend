@@ -35,6 +35,12 @@
         <createIndex tableName="conversations" indexName="idx_conv_created_at">
             <column name="created_at" descending="true"/>
         </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="conversations"/>
+        </rollback>
     </changeSet>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -70,6 +76,12 @@
         <createIndex tableName="conversation_members" indexName="idx_convmember_user_id">
             <column name="user_id"/>
         </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="conversation_members"/>
+        </rollback>
     </changeSet>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -126,6 +138,12 @@
         <createIndex tableName="messages" indexName="idx_msg_sender">
             <column name="sender_id"/>
         </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="messages"/>
+        </rollback>
     </changeSet>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -158,6 +176,12 @@
         <createIndex tableName="message_reads" indexName="idx_msgread_user_id">
             <column name="user_id"/>
         </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="message_reads"/>
+        </rollback>
     </changeSet>
 
 </databaseChangeLog>
