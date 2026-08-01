@@ -11,6 +11,12 @@
       "type": "java.lang.String",
       "defaultValue": "http://localhost:5173",
       "description": "Comma-separated list of allowed CORS origins. Each value is trimmed. Example: https://app.example.com,https://admin.example.com"
+    },
+    {
+      "name": "app.git-sha",
+      "type": "java.lang.String",
+      "defaultValue": "unknown",
+      "description": "Commit the running build came from, resolved from APP_GIT_SHA (CI build-arg) then RENDER_GIT_COMMIT (Render). Surfaced by /api/health."
     }
   ]
 }

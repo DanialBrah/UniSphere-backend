@@ -16,6 +16,14 @@
                 tableName="clubs"
                 columnName="advisor_student_id"
                 newDataType="BIGINT UNSIGNED"/>
+        <!-- modifyDataType has no auto-rollback; without this a rollback run aborts.
+             Safe to reverse — the column carries no FK (002 leaves that to the app layer). -->
+        <rollback>
+            <modifyDataType
+                    tableName="clubs"
+                    columnName="advisor_student_id"
+                    newDataType="BIGINT"/>
+        </rollback>
     </changeSet>
 
 </databaseChangeLog>

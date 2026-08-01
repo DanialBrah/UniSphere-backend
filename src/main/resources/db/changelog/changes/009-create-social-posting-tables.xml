@@ -58,6 +58,11 @@
     <!-- FULLTEXT index must be raw SQL — Liquibase has no direct element for it -->
     <changeSet id="009-02" author="system">
         <sql>ALTER TABLE posts ADD FULLTEXT INDEX ft_posts_title_content (title, content)</sql>
+        <!-- Raw <sql> is never auto-reversible; the index is derived data, so dropping it
+             restores the prior state exactly. -->
+        <rollback>
+            <sql>ALTER TABLE posts DROP INDEX ft_posts_title_content</sql>
+        </rollback>
     </changeSet>
 
     <!-- ═══════════════════════════════════════════════════════════════════════

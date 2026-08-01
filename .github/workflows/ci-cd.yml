@@ -2,29 +2,78 @@ name: UniSphere Backend CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
+
+# No job writes to the repo; real credentials come from secrets, not GITHUB_TOKEN.
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel an in-flight main run — it may be mid image-push or mid-deploy.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   IMAGE_NAME: unisphere-backend
   JAVA_VERSION: '21'
 
 jobs:
+  # ── Build & test ──────────────────────────────────────────────────────────────
+  # Source of truth for tests and coverage. Hosted, so it still gates when the
+  # self-hosted machine is off. No MySQL service container needed —
+  # AbstractIntegrationTest starts its own via Testcontainers.
   build-test:
     name: Build & Test Backend
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build, test and package
+        run: ./mvnw -B verify
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 7
+
+      # Lets sonar-scan report coverage without re-running the suite.
+      - name: Upload JaCoCo execution data
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: jacoco-exec
+          path: target/jacoco.exec
+          retention-days: 7
+
+  # ── Migration reversibility ───────────────────────────────────────────────────
+  # Liquibase applies changelogs at app startup, so an unreversible changeset would
+  # otherwise surface against the production database. updateTestingRollback runs
+  # update → rollback → update and fails the PR instead. Needs a real JDBC target,
+  # hence the service container.
+  migration-check:
+    name: Migration Rollback Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       mysql:
         image: mysql:8.0
         env:
-          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
-          MYSQL_DATABASE: unisphere
+          # Throwaway container — a literal, not a secret, because it guards nothing.
+          MYSQL_ROOT_PASSWORD: ci-throwaway
+          MYSQL_DATABASE: unisphere_migrations
         ports:
           - 3306:3306
         options: >-
@@ -34,83 +83,140 @@ jobs:
           --health-retries=5
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: Make Maven wrapper executable
-        run: chmod +x mvnw
+      - name: Verify every changeset can be rolled back
+        run: >-
+          ./mvnw -B liquibase:updateTestingRollback
+          -Dliquibase.url=jdbc:mysql://127.0.0.1:3306/unisphere_migrations
+          -Dliquibase.username=root
+          -Dliquibase.password=ci-throwaway
 
-      - name: Run tests
-        run: ./mvnw test
-        env:
-          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/unisphere
-          SPRING_DATASOURCE_USERNAME: root
-          SPRING_DATASOURCE_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
-
-  push:
-    name: Push Docker Image
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: [build-test, sonar-scan]
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.run_number }}
-
+  # ── Static analysis ───────────────────────────────────────────────────────────
   sonar-scan:
     name: SonarQube Scan
     runs-on: [self-hosted, sonar, backend]
     timeout-minutes: 20
+    needs: build-test
+    # Self-hosted runner: keep fork PRs from executing untrusted code on it.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Sonar needs full history for new-code / blame attribution
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: Make Maven wrapper executable
-        run: chmod +x mvnw
+      - name: Download JaCoCo execution data
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: jacoco-exec
+          path: target/
 
-      - name: Run tests with coverage
-        run: ./mvnw clean verify
+      # No `clean` — the downloaded jacoco.exec must survive. jacoco:report then
+      # regenerates the XML that sonar.coverage.jacoco.xmlReportPaths points at.
+      - name: Compile and generate coverage report
+        run: ./mvnw -B -DskipTests verify
 
       - name: SonarQube analysis
-        run: ./mvnw sonar:sonar -Dsonar.token=${{ secrets.SONAR_TOKEN }} -Dsonar.host.url=http://host.docker.internal:9000 -Dsonar.qualitygate.wait=true
+        run: >-
+          ./mvnw -B sonar:sonar
+          -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+          -Dsonar.host.url=${{ vars.SONAR_HOST_URL }}
+          -Dsonar.qualitygate.wait=true
 
+  # ── Image build, scan and publish ─────────────────────────────────────────────
+  push:
+    name: Push Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [build-test, migration-check, sonar-scan]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          # Keeps the dependency:go-offline layer warm between runs.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image for vulnerabilities
+        # Pinned to a commit SHA, not a tag: aquasecurity/trivy-action had its version tags
+        # hijacked in a March 2026 supply-chain compromise (GHSA-69fq-xp46-6x23). This SHA is
+        # v0.35.0, the one release confirmed protected by GitHub's immutable-releases feature.
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          image-ref: ${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push Docker image
+        env:
+          IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+        run: |
+          docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:latest"
+          docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:${{ github.run_number }}"
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:${{ github.run_number }}"
+
+  # ── Deploy ────────────────────────────────────────────────────────────────────
   deploy-to-render:
     name: Deploy to Render
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Headroom for the 10-minute health poll below, so the job timeout can't fire
+    # first and hide the real error behind a "cancelled" status.
+    timeout-minutes: 13
     needs: push
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Trigger Render deployment
+        run: curl -fsS -X POST '${{ secrets.RENDER_DEPLOY_HOOK }}'
+
+      # Reports health to CI; it cannot roll back. The actual rollback comes from
+      # Render's own Health Check Path (/api/health), set on the service.
+      - name: Wait for new deploy to become healthy
         run: |
-          curl -X POST '${{ secrets.RENDER_DEPLOY_HOOK }}'
+          for i in $(seq 1 60); do
+            if curl -fs '${{ secrets.RENDER_HEALTH_URL }}' > /dev/null; then
+              echo "Backend is healthy"
+              exit 0
+            fi
+            echo "Waiting for Render deploy to come up... ($i)"
+            sleep 10
+          done
+          echo "::error::Render deployment did not become healthy within 10 minutes"
+          exit 1

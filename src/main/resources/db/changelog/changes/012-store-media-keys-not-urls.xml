@@ -21,6 +21,11 @@
         unisphere-media-bucket) and the key prefix repeats the bucket name in the Garage case
         ('.../posts/posts/9/uuid.jpeg'), so anchoring on the last occurrence is what survives all
         three layouts. Rows already holding a bare key are left alone by the LIKE 'http%' guard.
+
+        ⚠ ONE-WAY MIGRATION. The UPDATEs discard the endpoint and bucket segments, and nothing
+        in the row retains them, so no rollback can rebuild the original URL. The empty
+        <rollback/> below only keeps a rollback run from erroring — it is an admission, not a
+        reversal. To undo this in production, restore from a backup taken before it ran.
     -->
 
     <changeSet id="012-01-rename-post-media-url-to-key" author="unisphere">
@@ -37,6 +42,8 @@
             SET media_key = CONCAT('posts/', SUBSTRING_INDEX(media_key, '/posts/', -1))
             WHERE media_key LIKE 'http%/posts/%';
         </sql>
+        <!-- Irreversible — see the one-way warning at the top of this file. -->
+        <rollback/>
     </changeSet>
 
     <changeSet id="012-03-backfill-avatar-keys" author="unisphere">
@@ -66,6 +73,8 @@
             SET logo_url = CONCAT('avatars/', SUBSTRING_INDEX(logo_url, '/avatars/', -1))
             WHERE logo_url LIKE 'http%/avatars/%';
         </sql>
+        <!-- Irreversible, same as 012-02. -->
+        <rollback/>
     </changeSet>
 
 </databaseChangeLog>

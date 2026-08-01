@@ -1,0 +1,45 @@
+version: 2
+
+# Everything targets `develop` (main only receives merges). Minor/patch bumps are
+# grouped into one PR per ecosystem per week; majors stay separate because those are
+# the ones that need reading.
+updates:
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    target-branch: develop
+    open-pull-requests-limit: 5
+    groups:
+      maven-minor-and-patch:
+        update-types: [ minor, patch ]
+    ignore:
+      # A Spring Boot major drags the whole managed tree with it — that's a migration,
+      # not a dependency bump.
+      - dependency-name: org.springframework.boot:spring-boot-starter-parent
+        update-types: [ version-update:semver-major ]
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    target-branch: develop
+    open-pull-requests-limit: 3
+    groups:
+      docker-minor-and-patch:
+        update-types: [ minor, patch ]
+
+  # Keeps the SHA pins in .github/workflows/ current — without this, pinning just means
+  # permanently stale actions.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    target-branch: develop
+    open-pull-requests-limit: 3
+    groups:
+      actions-all:
+        patterns: [ "*" ]
