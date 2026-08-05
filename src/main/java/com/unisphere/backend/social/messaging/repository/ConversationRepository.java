@@ -26,6 +26,8 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
             """)
     Optional<Conversation> findByIdAndMemberId(@Param("convId") Long convId, @Param("userId") Long userId);
 
+    Optional<Conversation> findByCommunityId(Long communityId);
+
     @Query("""
             SELECT c FROM Conversation c
             WHERE c.convType = 'DIRECT'

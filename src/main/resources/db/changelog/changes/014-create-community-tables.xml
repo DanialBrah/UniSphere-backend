@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         communities
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="014-01" author="system">
+        <createTable tableName="communities">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="created_by" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_communities_creator" references="users(id)"/>
+            </column>
+            <column name="university_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true" foreignKeyName="fk_communities_university" references="users(id)"/>
+            </column>
+            <column name="name" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="banner_key" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="visibility" type="ENUM('PUBLIC','UNIVERSITY_ONLY','PRIVATE')" defaultValue="PUBLIC">
+                <constraints nullable="false"/>
+            </column>
+            <column name="member_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+        <createIndex tableName="communities" indexName="idx_communities_creator">
+            <column name="created_by"/>
+        </createIndex>
+        <createIndex tableName="communities" indexName="idx_communities_university">
+            <column name="university_id"/>
+        </createIndex>
+        <createIndex tableName="communities" indexName="idx_communities_visibility_created">
+            <column name="visibility"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="communities"/>
+        </rollback>
+    </changeSet>
+
+    <!-- FULLTEXT index must be raw SQL — Liquibase has no direct element for it -->
+    <changeSet id="014-02" author="system">
+        <sql>ALTER TABLE communities ADD FULLTEXT INDEX ft_communities_name_description (name, description)</sql>
+        <!-- Raw <sql> is never auto-reversible; the index is derived data, so dropping it
+             restores the prior state exactly. -->
+        <rollback>
+            <sql>ALTER TABLE communities DROP INDEX ft_communities_name_description</sql>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         community_members
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="014-03" author="system">
+        <createTable tableName="community_members">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="community_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_communitymember_community"
+                             references="communities(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_communitymember_user"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="role" type="ENUM('ADMIN','MODERATOR','MEMBER')" defaultValue="MEMBER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="joined_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="community_members"
+                             columnNames="community_id, user_id"
+                             constraintName="uq_community_member"/>
+        <createIndex tableName="community_members" indexName="idx_communitymember_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="community_members"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         community_bans
+         Presence of a row = banned; unban is a row delete, not a status flag.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="014-04" author="system">
+        <createTable tableName="community_bans">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="community_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_communityban_community"
+                             references="communities(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_communityban_user"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="banned_by" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_communityban_bannedby" references="users(id)"/>
+            </column>
+            <column name="reason" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="banned_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="community_bans"
+                             columnNames="community_id, user_id"
+                             constraintName="uq_community_ban"/>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="community_bans"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         community_join_requests
+         No unique constraint on (community_id, user_id): a rejected user may
+         re-apply later, so history must be preservable. "Only one active PENDING
+         row" is enforced in CommunityMembershipService instead.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="014-05" author="system">
+        <createTable tableName="community_join_requests">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="community_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_joinrequest_community"
+                             references="communities(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_joinrequest_user"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="status" type="ENUM('PENDING','APPROVED','REJECTED')" defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="message" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="reviewed_by" type="BIGINT UNSIGNED">
+                <constraints nullable="true"/>
+            </column>
+            <column name="reviewed_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="community_join_requests"
+                                 baseColumnNames="reviewed_by"
+                                 referencedTableName="users"
+                                 referencedColumnNames="id"
+                                 constraintName="fk_joinrequest_reviewer"
+                                 onDelete="SET NULL"/>
+        <createIndex tableName="community_join_requests" indexName="idx_joinrequest_community_status">
+            <column name="community_id"/>
+            <column name="status"/>
+        </createIndex>
+        <createIndex tableName="community_join_requests" indexName="idx_joinrequest_user">
+            <column name="user_id"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="community_join_requests"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         community_announcements
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="014-06" author="system">
+        <createTable tableName="community_announcements">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="community_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_announcement_community"
+                             references="communities(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="author_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_announcement_author" references="users(id)"/>
+            </column>
+            <column name="title" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="content" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_pinned" type="TINYINT(1)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+        <createIndex tableName="community_announcements" indexName="idx_announcement_community_created">
+            <column name="community_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="community_announcements"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         community_posts
+         Join row linking an existing Post into a community's feed.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="014-07" author="system">
+        <createTable tableName="community_posts">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="community_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_communitypost_community"
+                             references="communities(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="post_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_communitypost_post"
+                             references="posts(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="community_posts"
+                             columnNames="community_id, post_id"
+                             constraintName="uq_community_post"/>
+        <createIndex tableName="community_posts" indexName="idx_communitypost_community_created">
+            <column name="community_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="community_posts" indexName="idx_communitypost_post">
+            <column name="post_id"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="community_posts"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

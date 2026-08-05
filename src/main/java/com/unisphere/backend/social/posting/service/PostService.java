@@ -229,6 +229,18 @@ public class PostService {
                 currentUser);
     }
 
+    // ── Reuse by other modules (e.g. community post feeds) ──────────────────
+
+    /** Public wrapper around {@link #toPostResponse} — lets other modules reuse this mapping. */
+    public PostResponse toResponse(Post post, User viewer) {
+        return toPostResponse(post, viewer);
+    }
+
+    /** Public wrapper around {@link #toPostResponses} — lets other modules reuse this mapping. */
+    public Page<PostResponse> toResponses(Page<Post> posts, User viewer) {
+        return toPostResponses(posts, viewer);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private Post findActivePost(Long postId) {

@@ -95,6 +95,9 @@ public class ConversationService {
         if (conv.getConvType() == ConversationType.DIRECT) {
             throw new IllegalArgumentException("Cannot add members to a direct conversation");
         }
+        if (conv.getConvType() == ConversationType.COMMUNITY) {
+            throw new IllegalArgumentException("Manage membership through the community, not the conversation");
+        }
         assertAdmin(convId, currentUser.getId());
 
         User user = userRepository.findById(req.userId())
@@ -114,8 +117,11 @@ public class ConversationService {
     }
 
     public MemberSummary promoteMember(Long convId, Long targetUserId, User currentUser) {
-        conversationRepository.findById(convId)
+        Conversation conv = conversationRepository.findById(convId)
                 .orElseThrow(() -> new ConversationNotFoundException(convId));
+        if (conv.getConvType() == ConversationType.COMMUNITY) {
+            throw new IllegalArgumentException("Manage roles through the community, not the conversation");
+        }
         assertAdmin(convId, currentUser.getId());
         ConversationMember member = memberRepository.findByConversationIdAndUserId(convId, targetUserId)
                 .orElseThrow(() -> new IllegalArgumentException("User " + targetUserId + " is not a member of this conversation"));
@@ -129,6 +135,11 @@ public class ConversationService {
     }
 
     public void removeMember(Long convId, Long targetUserId, User currentUser) {
+        Conversation conv = conversationRepository.findById(convId)
+                .orElseThrow(() -> new ConversationNotFoundException(convId));
+        if (conv.getConvType() == ConversationType.COMMUNITY) {
+            throw new IllegalArgumentException("Manage membership through the community, not the conversation");
+        }
         boolean isSelf = currentUser.getId().equals(targetUserId);
         if (!isSelf) {
             assertAdmin(convId, currentUser.getId());
@@ -141,6 +152,9 @@ public class ConversationService {
     public void deleteConversation(Long convId, User currentUser) {
         Conversation conv = conversationRepository.findById(convId)
                 .orElseThrow(() -> new ConversationNotFoundException(convId));
+        if (conv.getConvType() == ConversationType.COMMUNITY) {
+            throw new IllegalArgumentException("Delete the community instead of its conversation directly");
+        }
         if (conv.getConvType() == ConversationType.DIRECT) {
             assertMembership(convId, currentUser.getId());
         } else {

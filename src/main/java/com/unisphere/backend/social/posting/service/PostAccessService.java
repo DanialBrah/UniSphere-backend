@@ -2,6 +2,7 @@ package com.unisphere.backend.social.posting.service;
 
 import com.unisphere.backend.identity.entity.Role;
 import com.unisphere.backend.identity.entity.User;
+import com.unisphere.backend.social.community.service.CommunityAccessService;
 import com.unisphere.backend.social.follow.repository.FollowRepository;
 import com.unisphere.backend.social.posting.entity.Post;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 public class PostAccessService {
 
     private final FollowRepository followRepository;
+    private final CommunityAccessService communityAccessService;
 
     public boolean canView(Post post, User viewer) {
         if (post.getUserId().equals(viewer.getId())) return true;
@@ -24,6 +26,10 @@ public class PostAccessService {
             }
             case FRIENDS -> isMutualFollow(viewer.getId(), post.getUserId());
             case PRIVATE -> false;
+            // A community post's real gate is community membership, not a post-level flag —
+            // delegates to CommunityAccessService, which resolves the owning community via
+            // community_posts. Same cross-module reach as the FRIENDS case above into follows.
+            case COMMUNITY -> communityAccessService.canViewPost(post.getId(), viewer);
         };
     }
 

@@ -115,6 +115,30 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error("NOT_CONVERSATION_MEMBER", ex.getMessage()));
     }
 
+    @ExceptionHandler(CommunityNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCommunityNotFound(CommunityNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error("COMMUNITY_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(NotCommunityMemberException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotCommunityMember(NotCommunityMemberException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error("NOT_COMMUNITY_MEMBER", ex.getMessage()));
+    }
+
+    @ExceptionHandler(CommunityAnnouncementNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCommunityAnnouncementNotFound(CommunityAnnouncementNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error("COMMUNITY_ANNOUNCEMENT_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(CommunityJoinRequestNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCommunityJoinRequestNotFound(CommunityJoinRequestNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error("COMMUNITY_JOIN_REQUEST_NOT_FOUND", ex.getMessage()));
+    }
+
     @ExceptionHandler(ChatbotException.class)
     public ResponseEntity<ApiResponse<Void>> handleChatbot(ChatbotException ex) {
         log.error("Chatbot error: {}", ex.getMessage(), ex);

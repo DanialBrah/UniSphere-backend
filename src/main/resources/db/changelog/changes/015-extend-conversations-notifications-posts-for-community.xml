@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         conversations.community_id — links a COMMUNITY-type conversation back to
+         its owning community. Nullable and unique: DIRECT/GROUP rows leave it
+         null (NULLs don't collide under a unique index in MySQL), and the
+         uniqueness enforces "at most one conversation per community".
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="015-01" author="system">
+        <addColumn tableName="conversations">
+            <column name="community_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"/>
+            </column>
+        </addColumn>
+        <addForeignKeyConstraint baseTableName="conversations"
+                                 baseColumnNames="community_id"
+                                 referencedTableName="communities"
+                                 referencedColumnNames="id"
+                                 constraintName="fk_conv_community"
+                                 onDelete="CASCADE"/>
+        <addUniqueConstraint tableName="conversations"
+                             columnNames="community_id"
+                             constraintName="uq_conv_community"/>
+        <!-- MySQL uses the unique index to back the FK constraint (same column), so it must be
+             dropped first — dropping the unique constraint while the FK still references its
+             index fails with "needed in a foreign key constraint". -->
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="conversations" constraintName="fk_conv_community"/>
+            <dropUniqueConstraint tableName="conversations" constraintName="uq_conv_community"/>
+            <dropColumn tableName="conversations" columnName="community_id"/>
+        </rollback>
+    </changeSet>
+
+    <!-- Enum extensions must be raw SQL — Liquibase has no "modify enum" changetype. -->
+    <changeSet id="015-02" author="system">
+        <sql>ALTER TABLE conversations MODIFY COLUMN conv_type ENUM('DIRECT','GROUP','COMMUNITY') NOT NULL DEFAULT 'DIRECT'</sql>
+        <rollback>
+            <sql>ALTER TABLE conversations MODIFY COLUMN conv_type ENUM('DIRECT','GROUP') NOT NULL DEFAULT 'DIRECT'</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="015-03" author="system">
+        <sql>ALTER TABLE notifications MODIFY COLUMN notif_type ENUM('LIKE','COMMENT','FOLLOW','MENTION','EVENT','JOB','MESSAGE','ORDER','SERVICE_ORDER','CLUB_INVITE','PROJECT_INVITE','MATCH','STUDY_SESSION','LOST_FOUND_CLAIM','VERIFICATION','COMMUNITY_ANNOUNCEMENT','COMMUNITY_JOIN_REQUEST','COMMUNITY_JOIN_APPROVED','COMMUNITY_JOIN_REJECTED','COMMUNITY_ROLE_CHANGED') NOT NULL</sql>
+        <rollback>
+            <sql>ALTER TABLE notifications MODIFY COLUMN notif_type ENUM('LIKE','COMMENT','FOLLOW','MENTION','EVENT','JOB','MESSAGE','ORDER','SERVICE_ORDER','CLUB_INVITE','PROJECT_INVITE','MATCH','STUDY_SESSION','LOST_FOUND_CLAIM','VERIFICATION') NOT NULL</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="015-04" author="system">
+        <sql>ALTER TABLE posts MODIFY COLUMN visibility ENUM('PUBLIC','UNIVERSITY','FRIENDS','PRIVATE','COMMUNITY') NOT NULL DEFAULT 'PUBLIC'</sql>
+        <rollback>
+            <sql>ALTER TABLE posts MODIFY COLUMN visibility ENUM('PUBLIC','UNIVERSITY','FRIENDS','PRIVATE') NOT NULL DEFAULT 'PUBLIC'</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
