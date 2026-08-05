@@ -66,6 +66,30 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error("COMMENT_NOT_FOUND", ex.getMessage()));
     }
 
+    @ExceptionHandler(NewsArticleNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNewsArticleNotFound(NewsArticleNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error("NEWS_ARTICLE_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(NewsCommentNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNewsCommentNotFound(NewsCommentNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error("NEWS_COMMENT_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(NewsAuthoringNotAllowedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNewsAuthoringNotAllowed(NewsAuthoringNotAllowedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error("NEWS_AUTHORING_NOT_ALLOWED", ex.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidNewsStatusTransitionException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidNewsStatusTransition(InvalidNewsStatusTransitionException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error("INVALID_NEWS_STATUS_TRANSITION", ex.getMessage()));
+    }
+
     @ExceptionHandler(MediaUploadException.class)
     public ResponseEntity<ApiResponse<Void>> handleMediaUpload(MediaUploadException ex) {
         log.error("Media upload failed: {}", ex.getMessage(), ex);

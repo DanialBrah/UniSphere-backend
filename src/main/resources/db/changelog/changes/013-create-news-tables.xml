@@ -1,0 +1,322 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         news_articles
+         users.id is BIGINT UNSIGNED — all FKs referencing it must match, or MySQL
+         rejects the constraint outright on a signedness mismatch.
+
+         university_id references users(id), NOT universities(id): under JOINED
+         inheritance universities.user_id IS users.id, so users(id) is the stable
+         target. posts.university_id does the same for the same reason (see 005).
+
+         "Scheduled" is not a status — it is status = DRAFT with a non-null
+         scheduled_at, which idx_news_articles_scheduled serves directly. Keeping
+         the ENUM at three members avoids paying for an ALTER to add a fourth.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="013-01" author="system">
+        <createTable tableName="news_articles">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="author_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_articles_author" references="users(id)"/>
+            </column>
+            <column name="university_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true" foreignKeyName="fk_news_articles_university" references="users(id)"/>
+            </column>
+            <column name="title" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="summary" type="VARCHAR(500)"/>
+            <column name="content" type="LONGTEXT">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Bare object key (news/{userId}/{uuid}.{ext}), never a resolved URL — see 012. -->
+            <column name="cover_image_key" type="VARCHAR(500)"/>
+            <column name="category" type="ENUM('GENERAL','ACADEMIC','SPORTS','EVENTS','TECH','ALUMNI')"
+                    defaultValue="GENERAL">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="ENUM('DRAFT','PUBLISHED','ARCHIVED')" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="visibility" type="ENUM('PUBLIC','UNIVERSITY')" defaultValue="PUBLIC">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_featured" type="TINYINT(1)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="views_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="likes_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="published_at" type="DATETIME(6)"/>
+            <column name="scheduled_at" type="DATETIME(6)"/>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)"/>
+        </createTable>
+
+        <createIndex tableName="news_articles" indexName="idx_news_articles_author_created">
+            <column name="author_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="news_articles" indexName="idx_news_articles_university">
+            <column name="university_id"/>
+        </createIndex>
+        <!-- The main feed predicate: status + visibility, newest published first. -->
+        <createIndex tableName="news_articles" indexName="idx_news_articles_feed">
+            <column name="status"/>
+            <column name="visibility"/>
+            <column name="published_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="news_articles" indexName="idx_news_articles_category">
+            <column name="category"/>
+            <column name="published_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="news_articles" indexName="idx_news_articles_featured">
+            <column name="is_featured"/>
+            <column name="published_at" descending="true"/>
+        </createIndex>
+        <!-- Serves the once-a-minute publisher sweep, which is otherwise a full scan. -->
+        <createIndex tableName="news_articles" indexName="idx_news_articles_scheduled">
+            <column name="status"/>
+            <column name="scheduled_at"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="news_articles"/>
+        </rollback>
+    </changeSet>
+
+    <!-- FULLTEXT index must be raw SQL — Liquibase has no direct element for it.
+         Built on an empty table, so it is instantaneous and holds no meaningful lock. -->
+    <changeSet id="013-02" author="system">
+        <sql>ALTER TABLE news_articles ADD FULLTEXT INDEX ft_news_articles_title_content (title, content)</sql>
+        <!-- Raw <sql> is never auto-reversible; the index is derived data, so dropping it
+             restores the prior state exactly. Liquibase rolls back in reverse declaration
+             order, so this DROP INDEX runs before 013-01's DROP TABLE — declaring the
+             FULLTEXT changeset after the table is what makes the reverse order correct. -->
+        <rollback>
+            <sql>ALTER TABLE news_articles DROP INDEX ft_news_articles_title_content</sql>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         news_media — inline gallery for an article body
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="013-03" author="system">
+        <createTable tableName="news_media">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="article_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_media_article"
+                             references="news_articles(id)"/>
+            </column>
+            <!-- media_key, not media_url: changeset 012 already paid to rename the posts
+                 equivalent once. Storing an endpoint orphans the row on a provider swap. -->
+            <column name="media_key" type="VARCHAR(500)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="media_type" type="ENUM('IMAGE','VIDEO')">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sort_order" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <createIndex tableName="news_media" indexName="idx_news_media_article">
+            <column name="article_id"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails. -->
+        <rollback>
+            <dropTable tableName="news_media"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         news_tags — free-text topic tags (unlike post_tags, which tag users)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="013-04" author="system">
+        <createTable tableName="news_tags">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="article_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_tags_article"
+                             references="news_articles(id)"/>
+            </column>
+            <column name="tag" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="news_tags" columnNames="article_id,tag"
+                             constraintName="uq_news_tags"/>
+        <createIndex tableName="news_tags" indexName="idx_news_tags_tag">
+            <column name="tag"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL can use the unique index to back a foreign key
+             and then refuses to drop it. Dropping the table removes both together. -->
+        <rollback>
+            <dropTable tableName="news_tags"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         news_comments — threaded via a self-referencing parent_comment_id
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="013-05" author="system">
+        <createTable tableName="news_comments">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="article_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_comments_article"
+                             references="news_articles(id)"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_comments_user"
+                             references="users(id)"/>
+            </column>
+            <column name="parent_comment_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true" foreignKeyName="fk_news_comments_parent"
+                             references="news_comments(id)"/>
+            </column>
+            <column name="content" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="likes_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)"/>
+        </createTable>
+
+        <createIndex tableName="news_comments" indexName="idx_news_comments_article">
+            <column name="article_id"/>
+            <column name="created_at"/>
+        </createIndex>
+        <createIndex tableName="news_comments" indexName="idx_news_comments_parent">
+            <column name="parent_comment_id"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign key.
+             dropTable also disposes of the self-referencing FK in one statement — splitting
+             that constraint into its own changeset would order the reverse wrongly. -->
+        <rollback>
+            <dropTable tableName="news_comments"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         news_likes
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="013-06" author="system">
+        <createTable tableName="news_likes">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="article_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_likes_article"
+                             references="news_articles(id)"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_likes_user"
+                             references="users(id)"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="news_likes" columnNames="article_id,user_id"
+                             constraintName="uq_news_likes"/>
+        <!-- Explicit rollback: MySQL can use the unique index to back a foreign key
+             and then refuses to drop it. Dropping the table removes both together. -->
+        <rollback>
+            <dropTable tableName="news_likes"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         news_comment_likes
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="013-07" author="system">
+        <createTable tableName="news_comment_likes">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="comment_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_comment_likes_comment"
+                             references="news_comments(id)"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_comment_likes_user"
+                             references="users(id)"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="news_comment_likes" columnNames="comment_id,user_id"
+                             constraintName="uq_news_comment_likes"/>
+        <!-- Explicit rollback: MySQL can use the unique index to back a foreign key
+             and then refuses to drop it. Dropping the table removes both together. -->
+        <rollback>
+            <dropTable tableName="news_comment_likes"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         news_saves — reader bookmarks
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="013-08" author="system">
+        <createTable tableName="news_saves">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_saves_user"
+                             references="users(id)"/>
+            </column>
+            <column name="article_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" foreignKeyName="fk_news_saves_article"
+                             references="news_articles(id)"/>
+            </column>
+            <column name="saved_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="news_saves" columnNames="user_id,article_id"
+                             constraintName="uq_news_saves"/>
+        <!-- Explicit rollback: MySQL can use the unique index to back a foreign key
+             and then refuses to drop it. Dropping the table removes both together. -->
+        <rollback>
+            <dropTable tableName="news_saves"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

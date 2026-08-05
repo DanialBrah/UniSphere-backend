@@ -17,6 +17,12 @@
       "type": "java.lang.String",
       "defaultValue": "unknown",
       "description": "Commit the running build came from, resolved from APP_GIT_SHA (CI build-arg) then RENDER_GIT_COMMIT (Render). Surfaced by /api/health."
+    },
+    {
+      "name": "news.publish-cron",
+      "type": "java.lang.String",
+      "defaultValue": "0 * * * * *",
+      "description": "Cron for the scheduled-publish sweep that flips due news articles from DRAFT to PUBLISHED. Fires in UTC. The sweep is an idempotent bulk UPDATE, so every replica may run it."
     }
   ]
 }
