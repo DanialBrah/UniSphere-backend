@@ -20,5 +20,6 @@
     <include file="changes/013-create-news-tables.xml"                   relativeToChangelogFile="true"/>
     <include file="changes/014-create-community-tables.xml"              relativeToChangelogFile="true"/>
     <include file="changes/015-extend-conversations-notifications-posts-for-community.xml" relativeToChangelogFile="true"/>
+    <include file="changes/016-create-lost-found-tables.xml"           relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

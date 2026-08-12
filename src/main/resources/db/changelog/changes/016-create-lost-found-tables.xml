@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         lost_found_items
+
+         Extends the reference sketch in miscellaneous/unisphere_schema.sql:601
+         with the columns the feature actually needs:
+           - two coordinate pairs instead of one free-text `location`:
+             incident_* (where it was lost / found) and pickup_* (where it can
+             be collected). Both nullable — geolocation is optional, and a
+             report typed on a phone must not be blocked by a denied GPS
+             permission or a lift lobby with no signal.
+           - occurred_at, separate from created_at and required. They genuinely
+             differ (a Monday loss reported on Wednesday). The match scorer's
+             date term compares two occurred_at values; using created_at would
+             score reporting latency instead. The expiry sweep keys off
+             created_at, because expiry is about how long a listing has been
+             live, not how old the incident is.
+           - a category facet, and five status members rather than three:
+             CLOSED conflated "returned to its owner" with "gave up", and
+             /stats has to distinguish them. MySQL stores an ENUM as an
+             ordinal, so adding a member later costs an ALTER on a live table.
+           - primary_image_key, not image_url — bare object keys only, per
+             changeset 012.
+
+         No expires_at column on purpose: pre-computing it at insert would
+         freeze the current lost-found.expiry-days policy onto existing rows.
+         The sweep computes the cutoff in Java instead, so changing the env var
+         takes effect table-wide immediately.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="016-01" author="system">
+        <createTable tableName="lost_found_items">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="reported_by" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_lfitem_reporter"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <!-- users(id), not universities(id): under JOINED inheritance universities.user_id
+                 IS users.id, and users(id) is what 009 and 013 target. No deleteCascade —
+                 MySQL's default RESTRICT, matching fk_news_articles_university. -->
+            <column name="university_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"
+                             foreignKeyName="fk_lfitem_university"
+                             references="users(id)"/>
+            </column>
+            <!-- No default: the caller must state whether the item was lost or found. -->
+            <column name="item_type" type="ENUM('LOST','FOUND')">
+                <constraints nullable="false"/>
+            </column>
+            <column name="category"
+                    type="ENUM('ELECTRONICS','DOCUMENTS','CARDS_AND_KEYS','CLOTHING','BAGS','ACCESSORIES','BOOKS','SPORTS','PETS','OTHER')"
+                    defaultValue="OTHER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="ENUM('OPEN','CLAIMED','RESOLVED','EXPIRED','CANCELLED')" defaultValue="OPEN">
+                <constraints nullable="false"/>
+            </column>
+            <column name="title" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <!-- The reporter's withheld adjudication secret ("the case has a crack in the corner").
+                 Never rendered to anyone but the reporter or an ADMIN — not even to an approved
+                 claimant. See LostFoundAccessService.locationViewFor. -->
+            <column name="identifying_detail" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <!-- Bare object key (e.g. lost-found/9/uuid.jpeg) — never a resolved URL; see 012. -->
+            <column name="primary_image_key" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="incident_place" type="VARCHAR(255)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="incident_latitude" type="DECIMAL(10,7)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="incident_longitude" type="DECIMAL(10,7)">
+                <constraints nullable="true"/>
+            </column>
+            <!-- Meaningful on LOST items too, where it means "where to return it to me". -->
+            <column name="pickup_place" type="VARCHAR(255)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="pickup_latitude" type="DECIMAL(10,7)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="pickup_longitude" type="DECIMAL(10,7)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="pickup_instructions" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="occurred_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="resolved_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+
+        <createIndex tableName="lost_found_items" indexName="idx_lfitem_reporter">
+            <column name="reported_by"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="lost_found_items" indexName="idx_lfitem_university">
+            <column name="university_id"/>
+        </createIndex>
+        <createIndex tableName="lost_found_items" indexName="idx_lfitem_feed">
+            <column name="status"/>
+            <column name="item_type"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="lost_found_items" indexName="idx_lfitem_category">
+            <column name="category"/>
+            <column name="status"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <!-- The bounding-box prefilter for /items/nearby and /items/map. Geo columns lead and
+             there is deliberately no status prefix: /map accepts a multi-status viewport, and a
+             leading equality column would fragment the latitude range scan. MySQL range-scans on
+             incident_latitude and applies the longitude predicate from the index via
+             index-condition pushdown — the standard bbox trick with no spatial extension. -->
+        <createIndex tableName="lost_found_items" indexName="idx_lfitem_geo">
+            <column name="incident_latitude"/>
+            <column name="incident_longitude"/>
+        </createIndex>
+        <!-- The expiry sweep: WHERE status = 'OPEN' AND created_at <= cutoff. -->
+        <createIndex tableName="lost_found_items" indexName="idx_lfitem_expiry">
+            <column name="status"/>
+            <column name="created_at"/>
+        </createIndex>
+        <!-- The match-candidate date window. -->
+        <createIndex tableName="lost_found_items" indexName="idx_lfitem_occurred">
+            <column name="item_type"/>
+            <column name="occurred_at"/>
+        </createIndex>
+
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="lost_found_items"/>
+        </rollback>
+    </changeSet>
+
+    <!-- FULLTEXT index must be raw SQL — Liquibase has no direct element for it.
+         The column list (title, description) is load-bearing: the MATCH(...) AGAINST(...)
+         expressions in searchFullText and findMatchCandidates fail at RUNTIME, not at
+         startup, if it ever diverges from this index.
+         Declared after 016-01 so the reverse order drops the index before the table. -->
+    <changeSet id="016-02" author="system">
+        <sql>ALTER TABLE lost_found_items ADD FULLTEXT INDEX ft_lfitems_title_description (title, description)</sql>
+        <!-- Raw <sql> is never auto-reversible; the index is derived data, so dropping it
+             restores the prior state exactly. -->
+        <rollback>
+            <sql>ALTER TABLE lost_found_items DROP INDEX ft_lfitems_title_description</sql>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         lost_found_item_media
+         Owned child collection, the NewsMedia shape. No deleteCascade, matching
+         fk_news_media_article: the parent is soft-deleted, so a hard cascade
+         would never fire anyway.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="016-03" author="system">
+        <createTable tableName="lost_found_item_media">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="item_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_lfitem_media_item"
+                             references="lost_found_items(id)"/>
+            </column>
+            <column name="media_key" type="VARCHAR(500)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="media_type" type="ENUM('IMAGE','VIDEO')">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sort_order" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <createIndex tableName="lost_found_item_media" indexName="idx_lfitem_media_item">
+            <column name="item_id"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="lost_found_item_media"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         lost_found_claims
+
+         No unique constraint on (item_id, claimant_id): a rejected claimant may
+         re-apply later, so history must be preservable. "Only one active PENDING
+         row per (item, claimant)" is enforced in LostFoundClaimService instead —
+         the same call the community_join_requests table makes (see 014-05).
+
+         No deleted_at: claims are audit history and are never soft-deleted, so
+         LostFoundClaim carries no @SQLRestriction. Withdrawal is status =
+         CANCELLED, which is also why this table has an updated_at that
+         community_join_requests does not — cancelling is a claimant action, not
+         a review.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="016-04" author="system">
+        <createTable tableName="lost_found_claims">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="item_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_lfclaim_item"
+                             references="lost_found_items(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="claimant_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_lfclaim_claimant"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="status" type="ENUM('PENDING','APPROVED','REJECTED','CANCELLED')" defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Required proof of ownership. The reporter adjudicates against
+                 lost_found_items.identifying_detail, which the claimant never sees. -->
+            <column name="proof_text" type="VARCHAR(1000)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="proof_image_key" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="decision_note" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="reviewed_by" type="BIGINT UNSIGNED">
+                <constraints nullable="true"/>
+            </column>
+            <column name="reviewed_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="lost_found_claims"
+                                 baseColumnNames="reviewed_by"
+                                 referencedTableName="users"
+                                 referencedColumnNames="id"
+                                 constraintName="fk_lfclaim_reviewer"
+                                 onDelete="SET NULL"/>
+        <createIndex tableName="lost_found_claims" indexName="idx_lfclaim_item_status">
+            <column name="item_id"/>
+            <column name="status"/>
+        </createIndex>
+        <createIndex tableName="lost_found_claims" indexName="idx_lfclaim_claimant">
+            <column name="claimant_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="lost_found_claims"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
