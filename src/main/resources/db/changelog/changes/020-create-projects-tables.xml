@@ -1,0 +1,326 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         projects
+
+         Supersedes the sketch in miscellaneous/unisphere_schema.sql:496-529 — that skeleton only
+         modelled an owner-invites-user flow (project_contributors.status defaulted to INVITED).
+         This module is applicant-initiated instead (see project_applications below), so there is no
+         invite state here; NotificationType.PROJECT_INVITE stays reserved but unused.
+
+         university_id mirrors events.university_id, not jobs.university_id: it IS derived from the
+         owner's own affiliation (Student/Alumni/Club all carry one) rather than set explicitly,
+         because — unlike an Employer — every allowed owner role already has one. NULL only when the
+         owner has none. users(id), not universities(id): under JOINED inheritance universities.user_id
+         IS users.id, matching fk_job_university (019).
+
+         is_recruiting is an owner-controlled pause/resume switch, independent of per-role status —
+         a project can have open role slots but recruiting paused, or vice versa closed roles with
+         recruiting left on for a future role.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="020-01" author="system">
+        <createTable tableName="projects">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="owner_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_project_owner"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="university_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"
+                             foreignKeyName="fk_project_university"
+                             references="users(id)"/>
+            </column>
+            <column name="title" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <!-- Bare object key, never a resolved URL — see changeset 012. -->
+            <column name="cover_image_key" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="github_url" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="demo_url" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <!-- COMPLETED is terminal — see ProjectService.changeStatus. -->
+            <column name="status" type="ENUM('OPEN','IN_PROGRESS','COMPLETED')" defaultValue="OPEN">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_recruiting" type="TINYINT(1)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+
+        <createIndex tableName="projects" indexName="idx_project_owner">
+            <column name="owner_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="projects" indexName="idx_project_university">
+            <column name="university_id"/>
+        </createIndex>
+        <!-- The main browse feed: WHERE status = :status ORDER BY created_at DESC. -->
+        <createIndex tableName="projects" indexName="idx_project_feed">
+            <column name="status"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <!-- The "actively recruiting" browse filter. -->
+        <createIndex tableName="projects" indexName="idx_project_recruiting">
+            <column name="is_recruiting"/>
+            <column name="status"/>
+        </createIndex>
+
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="projects"/>
+        </rollback>
+    </changeSet>
+
+    <!-- FULLTEXT index must be raw SQL — Liquibase has no direct element for it.
+         The column list (title, description) is load-bearing: the MATCH(...) AGAINST(...)
+         expression in ProjectRepository.searchFullText fails at RUNTIME, not at startup,
+         if it ever diverges from this index. Declared after 020-01 so the reverse order
+         drops the index before the table. -->
+    <changeSet id="020-02" author="system">
+        <sql>ALTER TABLE projects ADD FULLTEXT INDEX ft_projects_title_description (title, description)</sql>
+        <rollback>
+            <sql>ALTER TABLE projects DROP INDEX ft_projects_title_description</sql>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         project_roles
+
+         The structured open positions a project is recruiting for — applicants apply to a specific
+         role, not the project generically (see project_applications). filled_count is denormalised,
+         mirroring jobs.application_count/events.registered_count, but IS a capacity counter here
+         (increments on application accept, decrements on member removal) — closer to
+         events.registered_count than to jobs.application_count's monotonic-total shape.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="020-03" author="system">
+        <createTable tableName="project_roles">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_prole_project"
+                             references="projects(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="title" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="slots" type="INT" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+            <column name="filled_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Auto-closes when filled_count >= slots; reopens if a member later leaves — see
+                 ProjectService.removeMember. Also settable by the owner as a manual override. -->
+            <column name="status" type="ENUM('OPEN','CLOSED')" defaultValue="OPEN">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <!-- A project's role list, and the apply-eligibility check (project_id, status = OPEN). -->
+        <createIndex tableName="project_roles" indexName="idx_prole_project">
+            <column name="project_id"/>
+            <column name="status"/>
+        </createIndex>
+
+        <rollback>
+            <dropTable tableName="project_roles"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         project_members
+
+         Active team roster only — post-acceptance, no invite state. Flat shape deliberately
+         mirrors community_members rather than the INVITED/ACCEPTED/DECLINED sketch in
+         unisphere_schema.sql: leaving/removal is a hard delete, no membership history needed for v1.
+         project_role_id is nullable/SET NULL — null for the owner's own row (no role slot), and
+         defensively preserved if a role definition is ever deleted out from under a member (though
+         ProjectService blocks deleting a role that still has members, so this branch is not
+         normally reachable).
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="020-04" author="system">
+        <createTable tableName="project_members">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_pmember_project"
+                             references="projects(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_pmember_user"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <!-- FK added in changeset 020-05 with onDelete="SET NULL" — the column-level
+                 constraints shorthand only supports a boolean deleteCascade, not SET NULL. -->
+            <column name="project_role_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"/>
+            </column>
+            <column name="member_role" type="ENUM('OWNER','CONTRIBUTOR')" defaultValue="CONTRIBUTOR">
+                <constraints nullable="false"/>
+            </column>
+            <column name="joined_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="project_members"
+                             columnNames="project_id, user_id"
+                             constraintName="uq_pmember_project_user"/>
+
+        <createIndex tableName="project_members" indexName="idx_pmember_project">
+            <column name="project_id"/>
+        </createIndex>
+        <!-- "Projects I've joined". -->
+        <createIndex tableName="project_members" indexName="idx_pmember_user">
+            <column name="user_id"/>
+            <column name="joined_at" descending="true"/>
+        </createIndex>
+
+        <rollback>
+            <dropTable tableName="project_members"/>
+        </rollback>
+    </changeSet>
+
+    <!-- project_role_id's FK is added in its own changeset with onDelete SET NULL — Liquibase's
+         createTable/constraints element has no onDelete="SET NULL" option, only deleteCascade. -->
+    <changeSet id="020-05" author="system">
+        <addForeignKeyConstraint baseTableName="project_members" baseColumnNames="project_role_id"
+                                 constraintName="fk_pmember_role"
+                                 referencedTableName="project_roles" referencedColumnNames="id"
+                                 onDelete="SET NULL"/>
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="project_members" constraintName="fk_pmember_role"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         project_applications
+
+         The apply-to-join pipeline, modelled on job_applications (019): same
+         UNIQUE(role, applicant) hard-constraint tradeoff — once decided, no re-applying to the same
+         role — and the same no-deleted_at/audit-history shape (withdrawal is status = WITHDRAWN, no
+         @SQLRestriction on the entity). message mirrors community_join_requests.message rather than
+         a résumé upload, which is out of scope here.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="020-06" author="system">
+        <createTable tableName="project_applications">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_papp_project"
+                             references="projects(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="project_role_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_papp_role"
+                             references="project_roles(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="applicant_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_papp_applicant"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="message" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="status" type="ENUM('PENDING','ACCEPTED','REJECTED','WITHDRAWN')" defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="decision_reason" type="VARCHAR(255)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="reviewed_by" type="BIGINT UNSIGNED">
+                <constraints nullable="true"
+                             foreignKeyName="fk_papp_reviewer"
+                             references="users(id)"/>
+            </column>
+            <column name="reviewed_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="withdrawn_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="project_applications"
+                             columnNames="project_role_id, applicant_id"
+                             constraintName="uq_papp_role_applicant"/>
+
+        <!-- Owner reviewing applicants for one role. -->
+        <createIndex tableName="project_applications" indexName="idx_papp_role">
+            <column name="project_role_id"/>
+            <column name="status"/>
+        </createIndex>
+        <!-- Owner reviewing applicants across every role on a project. -->
+        <createIndex tableName="project_applications" indexName="idx_papp_project">
+            <column name="project_id"/>
+            <column name="status"/>
+        </createIndex>
+        <!-- "My applications" across every project. -->
+        <createIndex tableName="project_applications" indexName="idx_papp_applicant">
+            <column name="applicant_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+
+        <rollback>
+            <dropTable tableName="project_applications"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

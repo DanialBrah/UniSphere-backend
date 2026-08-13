@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- notifications.notif_type is a MySQL ENUM (see 011, widened once already by 015-03 for
+         community). Adding a Java-side NotificationType constant alone does nothing — MySQL rejects
+         any value not in the column's own ENUM list ("Data truncated for column 'notif_type'").
+         This widens it for the four new PROJECT_APPLICATION_*/PROJECT_MEMBER_REMOVED values. -->
+    <changeSet id="021-01" author="system">
+        <sql>ALTER TABLE notifications MODIFY COLUMN notif_type ENUM('LIKE','COMMENT','FOLLOW','MENTION','EVENT','JOB','MESSAGE','ORDER','SERVICE_ORDER','CLUB_INVITE','PROJECT_INVITE','MATCH','STUDY_SESSION','LOST_FOUND_CLAIM','VERIFICATION','COMMUNITY_ANNOUNCEMENT','COMMUNITY_JOIN_REQUEST','COMMUNITY_JOIN_APPROVED','COMMUNITY_JOIN_REJECTED','COMMUNITY_ROLE_CHANGED','PROJECT_APPLICATION_RECEIVED','PROJECT_APPLICATION_ACCEPTED','PROJECT_APPLICATION_REJECTED','PROJECT_MEMBER_REMOVED') NOT NULL</sql>
+        <rollback>
+            <sql>ALTER TABLE notifications MODIFY COLUMN notif_type ENUM('LIKE','COMMENT','FOLLOW','MENTION','EVENT','JOB','MESSAGE','ORDER','SERVICE_ORDER','CLUB_INVITE','PROJECT_INVITE','MATCH','STUDY_SESSION','LOST_FOUND_CLAIM','VERIFICATION','COMMUNITY_ANNOUNCEMENT','COMMUNITY_JOIN_REQUEST','COMMUNITY_JOIN_APPROVED','COMMUNITY_JOIN_REJECTED','COMMUNITY_ROLE_CHANGED') NOT NULL</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
