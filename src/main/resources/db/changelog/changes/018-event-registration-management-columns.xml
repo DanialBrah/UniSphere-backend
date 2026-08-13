@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         event_registrations — cancellation audit trail.
+
+         Added so an organizer removing an attendee is distinguishable from the
+         attendee cancelling themselves: cancelled_by records who acted (self or
+         organizer/admin), cancellation_reason lets an organizer leave a note
+         (mirrors lost_found_claims.decision_note), and cancelled_at is an
+         explicit event timestamp rather than relying on the generic updated_at,
+         matching the checked_in_at precedent on this same table.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="018-01" author="system">
+        <addColumn tableName="event_registrations">
+            <column name="cancelled_by" type="BIGINT UNSIGNED">
+                <constraints nullable="true"/>
+            </column>
+            <column name="cancellation_reason" type="VARCHAR(255)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="cancelled_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+        </addColumn>
+        <addForeignKeyConstraint baseTableName="event_registrations"
+                                 baseColumnNames="cancelled_by"
+                                 referencedTableName="users"
+                                 referencedColumnNames="id"
+                                 constraintName="fk_ereg_cancelled_by"
+                                 onDelete="SET NULL"/>
+        <!-- The FK must be dropped before its column — MySQL refuses to drop a column that a
+             foreign key constraint still references. -->
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="event_registrations" constraintName="fk_ereg_cancelled_by"/>
+            <dropColumn tableName="event_registrations" columnName="cancelled_by"/>
+            <dropColumn tableName="event_registrations" columnName="cancellation_reason"/>
+            <dropColumn tableName="event_registrations" columnName="cancelled_at"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

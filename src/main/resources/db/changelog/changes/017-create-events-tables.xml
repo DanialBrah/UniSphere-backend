@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         events
+
+         Deliberately smaller than the paid-ticketing sketch in
+         miscellaneous/unisphere_schema.sql:432-456 — requires_ticket/ticket_price
+         are dropped entirely rather than carried as unused nullable columns, since
+         payment processing is explicitly out of scope for this pass. See
+         miscellaneous/plan/events.md for the full design rationale.
+
+         registered_count / waitlisted_count are denormalised rather than COUNT()-
+         on-read: every write that changes them already takes a pessimistic row
+         lock on this table for the capacity check (EventRepository.findByIdForUpdate),
+         so maintaining two INT columns in that same transaction is free and turns
+         every read (feed, map, detail) into a plain column read.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="017-01" author="system">
+        <createTable tableName="events">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="organizer_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_event_organizer"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <!-- users(id), not universities(id): under JOINED inheritance universities.user_id
+                 IS users.id, matching fk_lfitem_university (016) and fk_news_articles_university. -->
+            <column name="university_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"
+                             foreignKeyName="fk_event_university"
+                             references="users(id)"/>
+            </column>
+            <column name="title" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="category"
+                    type="ENUM('ACADEMIC','CAREER','WORKSHOP','SOCIAL','SPORTS','CULTURAL','TECH','CLUB','ORIENTATION','OTHER')"
+                    defaultValue="OTHER">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Every event is born DRAFT; PUBLISHED is an explicit organizer action. COMPLETED is
+                 written only by the scheduled completion sweep — see idx_event_completion below. -->
+            <column name="status" type="ENUM('DRAFT','PUBLISHED','CANCELLED','COMPLETED')" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Bare object key (e.g. events/9/uuid.jpeg) — never a resolved URL; see changeset 012. -->
+            <column name="cover_image_key" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="start_datetime" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="end_datetime" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_online" type="TINYINT(1)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <!-- online_url required iff is_online=true; venue_name/latitude/longitude required iff
+                 is_online=false. Enforced in EventService — MySQL has no portable conditional
+                 constraint, so this is a service-layer rule, same as LostFoundService's FOUND-item
+                 pickup-location rule. -->
+            <column name="online_url" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="venue_name" type="VARCHAR(255)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="latitude" type="DECIMAL(10,7)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="longitude" type="DECIMAL(10,7)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="registration_mode" type="ENUM('INTERNAL','EXTERNAL')" defaultValue="INTERNAL">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Required iff registration_mode=EXTERNAL. -->
+            <column name="external_registration_url" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <!-- NULL = unlimited. Must be NULL when registration_mode=EXTERNAL — capacity is
+                 meaningless without in-app tracking. -->
+            <column name="max_capacity" type="INT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="registered_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="waitlisted_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Set once by EventReminderScheduler; guards against sending the same reminder twice
+                 across sweep ticks. -->
+            <column name="reminder_sent_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+
+        <createIndex tableName="events" indexName="idx_event_organizer">
+            <column name="organizer_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="events" indexName="idx_event_university">
+            <column name="university_id"/>
+        </createIndex>
+        <!-- The main browse feed: WHERE status='PUBLISHED' ORDER BY start_datetime ASC. -->
+        <createIndex tableName="events" indexName="idx_event_feed">
+            <column name="status"/>
+            <column name="start_datetime"/>
+        </createIndex>
+        <createIndex tableName="events" indexName="idx_event_category">
+            <column name="category"/>
+            <column name="status"/>
+            <column name="start_datetime"/>
+        </createIndex>
+        <!-- The bounding-box prefilter for /events/nearby and /events/map. Geo columns lead with no
+             status prefix, same trick as idx_lfitem_geo (016) — no spatial extension needed. -->
+        <createIndex tableName="events" indexName="idx_event_geo">
+            <column name="latitude"/>
+            <column name="longitude"/>
+        </createIndex>
+        <!-- EventCompletionScheduler's bulk update: WHERE status='PUBLISHED' AND end_datetime <= now. -->
+        <createIndex tableName="events" indexName="idx_event_completion">
+            <column name="status"/>
+            <column name="end_datetime"/>
+        </createIndex>
+        <!-- EventReminderScheduler's candidate query. -->
+        <createIndex tableName="events" indexName="idx_event_reminder">
+            <column name="status"/>
+            <column name="reminder_sent_at"/>
+            <column name="start_datetime"/>
+        </createIndex>
+
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="events"/>
+        </rollback>
+    </changeSet>
+
+    <!-- FULLTEXT index must be raw SQL — Liquibase has no direct element for it.
+         The column list (title, description) is load-bearing: the MATCH(...) AGAINST(...)
+         expression in EventRepository.searchFullText fails at RUNTIME, not at startup,
+         if it ever diverges from this index.
+         Declared after 017-01 so the reverse order drops the index before the table. -->
+    <changeSet id="017-02" author="system">
+        <sql>ALTER TABLE events ADD FULLTEXT INDEX ft_events_title_description (title, description)</sql>
+        <rollback>
+            <sql>ALTER TABLE events DROP INDEX ft_events_title_description</sql>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         event_registrations
+
+         No UNIQUE(event_id, user_id): a hard unique constraint would permanently
+         block re-registering after a cancellation. "At most one active
+         (REGISTERED/WAITLISTED) row per (event, user)" is enforced in
+         EventRegistrationService instead — the same call lost_found_claims (016)
+         makes for (item_id, claimant_id).
+
+         No deleted_at: registrations are audit/attendance history, never soft
+         deleted — cancellation is status=CANCELLED. No @SQLRestriction on the
+         entity as a result, matching lost_found_claims.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="017-03" author="system">
+        <createTable tableName="event_registrations">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="event_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_ereg_event"
+                             references="events(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="user_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_ereg_user"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="status" type="ENUM('REGISTERED','WAITLISTED','CANCELLED','ATTENDED')" defaultValue="REGISTERED">
+                <constraints nullable="false"/>
+            </column>
+            <!-- UUID.randomUUID().toString() — a bare scannable string, not a rendered QR image.
+                 Turning it into a QR code is a client-side concern. -->
+            <column name="ticket_code" type="VARCHAR(40)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uq_ereg_ticket_code"/>
+            </column>
+            <column name="checked_in_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="checked_in_by" type="BIGINT UNSIGNED">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="event_registrations"
+                                 baseColumnNames="checked_in_by"
+                                 referencedTableName="users"
+                                 referencedColumnNames="id"
+                                 constraintName="fk_ereg_checked_in_by"
+                                 onDelete="SET NULL"/>
+        <createIndex tableName="event_registrations" indexName="idx_ereg_event_status">
+            <column name="event_id"/>
+            <column name="status"/>
+        </createIndex>
+        <createIndex tableName="event_registrations" indexName="idx_ereg_user">
+            <column name="user_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <!-- Non-unique — plain lookup speed for "does this user already have a row on this event".
+             The one-active-registration rule is enforced in the service layer, not here. -->
+        <createIndex tableName="event_registrations" indexName="idx_ereg_event_user">
+            <column name="event_id"/>
+            <column name="user_id"/>
+        </createIndex>
+
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="event_registrations"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

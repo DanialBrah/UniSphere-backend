@@ -21,5 +21,7 @@
     <include file="changes/014-create-community-tables.xml"              relativeToChangelogFile="true"/>
     <include file="changes/015-extend-conversations-notifications-posts-for-community.xml" relativeToChangelogFile="true"/>
     <include file="changes/016-create-lost-found-tables.xml"           relativeToChangelogFile="true"/>
+    <include file="changes/017-create-events-tables.xml"               relativeToChangelogFile="true"/>
+    <include file="changes/018-event-registration-management-columns.xml" relativeToChangelogFile="true"/>
 
 </databaseChangeLog>
