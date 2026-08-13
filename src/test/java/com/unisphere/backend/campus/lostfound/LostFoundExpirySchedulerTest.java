@@ -90,10 +90,13 @@ class LostFoundExpirySchedulerTest extends AbstractLostFoundIntegrationTest {
     }
 
     @Test
-    void softDeletedItemIsNotResurrected() {
+    void softDeletedItemIsNotResurrected() throws Exception {
+        String token = registerStudentAndGetToken("exp5@test.com", "EXP005");
+        Long reporterId = getUserId(token);
+
         LostFoundItem deleted = transactionTemplate.execute(tx -> {
             LostFoundItem item = new LostFoundItem();
-            item.setReportedBy(1L);
+            item.setReportedBy(reporterId);
             item.setItemType(LostFoundItemType.LOST);
             item.setCategory(LostFoundCategory.OTHER);
             item.setStatus(LostFoundItemStatus.OPEN);
