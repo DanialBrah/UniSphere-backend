@@ -23,5 +23,6 @@
     <include file="changes/016-create-lost-found-tables.xml"           relativeToChangelogFile="true"/>
     <include file="changes/017-create-events-tables.xml"               relativeToChangelogFile="true"/>
     <include file="changes/018-event-registration-management-columns.xml" relativeToChangelogFile="true"/>
+    <include file="changes/019-create-jobs-tables.xml"                    relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

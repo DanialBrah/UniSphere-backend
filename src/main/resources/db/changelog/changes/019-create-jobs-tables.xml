@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         jobs
+
+         Supersedes the sketch in miscellaneous/unisphere_schema.sql:395-429 — work_mode replaces
+         is_remote (adds HYBRID), experience_level and application_mode/external_apply_url are new.
+         application_mode/external_apply_url mirrors events.registration_mode/external_registration_url
+         exactly: INTERNAL is the in-app "Easy Apply" flow, EXTERNAL routes to the employer's own site.
+
+         university_id is NOT derived from the poster the way events.university_id is derived from
+         the organizer — an Employer account has no university affiliation of its own, so it is set
+         explicitly by the employer at creation. NULL = visible to all universities.
+
+         application_count is a monotonic total (incremented on submit only, never decremented) —
+         an informational stat and the trigger for JobService.deleteJob's delete guard, not a
+         capacity counter the way events.registered_count is.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="019-01" author="system">
+        <createTable tableName="jobs">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="employer_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_job_employer"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <!-- users(id), not universities(id): under JOINED inheritance universities.user_id
+                 IS users.id, matching fk_event_university (017). Set explicitly by the employer,
+                 never derived — see the header note above. -->
+            <column name="university_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"
+                             foreignKeyName="fk_job_university"
+                             references="users(id)"/>
+            </column>
+            <column name="title" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="requirements" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="job_type"
+                    type="ENUM('FULL_TIME','PART_TIME','INTERNSHIP','CONTRACT','FREELANCE')"
+                    defaultValue="FULL_TIME">
+                <constraints nullable="false"/>
+            </column>
+            <column name="work_mode" type="ENUM('ON_SITE','REMOTE','HYBRID')" defaultValue="ON_SITE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="experience_level"
+                    type="ENUM('INTERNSHIP','ENTRY_LEVEL','MID_LEVEL','SENIOR_LEVEL','MANAGER','EXECUTIVE')"
+                    defaultValue="ENTRY_LEVEL">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Required unless work_mode=REMOTE. Enforced in JobService — MySQL has no portable
+                 conditional constraint, same rule as events.online_url/venue_name. -->
+            <column name="location" type="VARCHAR(255)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="salary_min" type="DECIMAL(12,2)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="salary_max" type="DECIMAL(12,2)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="salary_currency" type="VARCHAR(3)" defaultValue="MYR">
+                <constraints nullable="false"/>
+            </column>
+            <column name="application_mode" type="ENUM('INTERNAL','EXTERNAL')" defaultValue="INTERNAL">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Required iff application_mode=EXTERNAL. -->
+            <column name="external_apply_url" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="application_deadline" type="DATE">
+                <constraints nullable="true"/>
+            </column>
+            <!-- Every job is born DRAFT; OPEN is an explicit employer action. -->
+            <column name="status" type="ENUM('DRAFT','OPEN','CLOSED','FILLED')" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="application_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+
+        <createIndex tableName="jobs" indexName="idx_job_employer">
+            <column name="employer_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="jobs" indexName="idx_job_university">
+            <column name="university_id"/>
+        </createIndex>
+        <!-- The main browse feed: WHERE status='OPEN' ORDER BY created_at DESC. -->
+        <createIndex tableName="jobs" indexName="idx_job_feed">
+            <column name="status"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="jobs" indexName="idx_job_type">
+            <column name="job_type"/>
+            <column name="status"/>
+        </createIndex>
+        <!-- JobDeadlineScheduler's sweep candidate query. -->
+        <createIndex tableName="jobs" indexName="idx_job_deadline">
+            <column name="status"/>
+            <column name="application_deadline"/>
+        </createIndex>
+
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="jobs"/>
+        </rollback>
+    </changeSet>
+
+    <!-- FULLTEXT index must be raw SQL — Liquibase has no direct element for it.
+         The column list (title, description) is load-bearing: the MATCH(...) AGAINST(...)
+         expression in JobRepository.searchFullText fails at RUNTIME, not at startup,
+         if it ever diverges from this index.
+         Declared after 019-01 so the reverse order drops the index before the table. -->
+    <changeSet id="019-02" author="system">
+        <sql>ALTER TABLE jobs ADD FULLTEXT INDEX ft_jobs_title_description (title, description)</sql>
+        <rollback>
+            <sql>ALTER TABLE jobs DROP INDEX ft_jobs_title_description</sql>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         job_applications
+
+         Unlike event_registrations, this DOES carry UNIQUE(job_id, applicant_id) — jobs have no
+         capacity/waitlist reason to allow re-entry after a withdrawal the way a cancelled event
+         registration does. Once WITHDRAWN, re-applying to the same posting is blocked at the DB
+         level, not just the service layer.
+
+         No deleted_at: applications are audit history, never soft deleted — withdrawal is
+         status=WITHDRAWN. No @SQLRestriction on the entity as a result, matching event_registrations.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="019-03" author="system">
+        <createTable tableName="job_applications">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="job_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_japp_job"
+                             references="jobs(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="applicant_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_japp_applicant"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <!-- Bare object key (e.g. job-applications/9/uuid.pdf) — never a resolved URL; see
+                 changeset 012. Intentional improvement over the resume_url column sketched in
+                 miscellaneous/unisphere_schema.sql:420. -->
+            <column name="resume_key" type="VARCHAR(500)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="cover_letter" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="status"
+                    type="ENUM('SUBMITTED','REVIEWED','SHORTLISTED','REJECTED','HIRED','WITHDRAWN')"
+                    defaultValue="SUBMITTED">
+                <constraints nullable="false"/>
+            </column>
+            <column name="decision_reason" type="VARCHAR(255)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="withdrawn_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="job_applications"
+                             columnNames="job_id, applicant_id"
+                             constraintName="uq_japp_job_applicant"/>
+
+        <!-- Employer reviewing applicants per job, optionally filtered by status. -->
+        <createIndex tableName="job_applications" indexName="idx_japp_job">
+            <column name="job_id"/>
+            <column name="status"/>
+        </createIndex>
+        <!-- "My applications" across every job. -->
+        <createIndex tableName="job_applications" indexName="idx_japp_applicant">
+            <column name="applicant_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="job_applications"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
