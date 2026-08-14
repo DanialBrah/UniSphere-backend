@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         service_listings
+
+         Supersedes the sketch in miscellaneous/unisphere_module4_services_addon.sql:7-26 — that
+         sketch predates this repo's Liquibase/entity conventions (raw AUTO_INCREMENT BIGINT, FLOAT
+         ratings, RESTRICT FKs, a redundant third REMOVED status). Deviations, deliberate:
+           - status is ACTIVE/PAUSED only. REMOVED is redundant with this codebase's established
+             soft-delete convention (deleted_at + @SQLRestriction, exactly like jobs/projects) —
+             status stays a pure availability toggle, orthogonal to deletion.
+           - rating_avg is DECIMAL(3,2), not FLOAT — this schema has zero FLOAT/DOUBLE columns
+             anywhere; every fractional value (salary, price) is DECIMAL. DECIMAL(3,2) covers
+             0.00-9.99, plenty for a 1-5 star average.
+           - university_id mirrors projects.university_id, not jobs.university_id: it IS derived
+             from the provider's own affiliation (Student/Alumni/Club all carry one) rather than set
+             explicitly. users(id), not universities(id): under JOINED inheritance
+             universities.user_id IS users.id, matching fk_project_university (020).
+           - price is nullable: required for FIXED/HOURLY, forbidden for NEGOTIABLE — app-layer rule
+             enforced in ServiceListingService, no DB CHECK (no CHECK-constraint precedent anywhere
+             in this schema; cross-field rules live in the service layer, e.g.
+             JobService.validateApplicationRules).
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="022-01" author="system">
+        <createTable tableName="service_listings">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="provider_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_svclisting_provider"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="university_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"
+                             foreignKeyName="fk_svclisting_university"
+                             references="users(id)"/>
+            </column>
+            <column name="title" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="category" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="pricing_type" type="ENUM('FIXED','HOURLY','NEGOTIABLE')" defaultValue="FIXED">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Required for FIXED/HOURLY, forbidden for NEGOTIABLE — see header note. -->
+            <column name="price" type="DECIMAL(10,2)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="delivery_mode" type="ENUM('ONLINE','PHYSICAL','BOTH')" defaultValue="BOTH">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Bare object key, never a resolved URL — see changeset 012. -->
+            <column name="portfolio_image_key" type="VARCHAR(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="rating_avg" type="DECIMAL(3,2)" defaultValueNumeric="0.00">
+                <constraints nullable="false"/>
+            </column>
+            <column name="rating_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="ENUM('ACTIVE','PAUSED')" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+
+        <!-- "My listings". -->
+        <createIndex tableName="service_listings" indexName="idx_svclisting_provider">
+            <column name="provider_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <createIndex tableName="service_listings" indexName="idx_svclisting_university">
+            <column name="university_id"/>
+        </createIndex>
+        <!-- The main browse feed: WHERE status = 'ACTIVE' ORDER BY created_at DESC. -->
+        <createIndex tableName="service_listings" indexName="idx_svclisting_feed">
+            <column name="status"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+        <!-- The category facet, combined with visibility. -->
+        <createIndex tableName="service_listings" indexName="idx_svclisting_category">
+            <column name="category"/>
+            <column name="status"/>
+        </createIndex>
+
+        <!-- Explicit rollback: MySQL refuses to drop an index that backs a foreign
+             key, so the auto-generated reverse (drop indexes, then table) fails.
+             Dropping the table removes its indexes and constraints together. -->
+        <rollback>
+            <dropTable tableName="service_listings"/>
+        </rollback>
+    </changeSet>
+
+    <!-- FULLTEXT index must be raw SQL — Liquibase has no direct element for it.
+         The column list (title, description) is load-bearing: the MATCH(...) AGAINST(...)
+         expression in ServiceListingRepository.searchFullText fails at RUNTIME, not at startup,
+         if it ever diverges. Declared after 022-01 so the reverse order drops the index before the
+         table. -->
+    <changeSet id="022-02" author="system">
+        <sql>ALTER TABLE service_listings ADD FULLTEXT INDEX ft_service_listings_title_description (title, description)</sql>
+        <rollback>
+            <sql>ALTER TABLE service_listings DROP INDEX ft_service_listings_title_description</sql>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         service_orders
+
+         A client's formal request against a listing. Unlike the reference sketch's RESTRICT FKs,
+         listing_id/client_id use deleteCascade="true" here to match this codebase's actual
+         convention — every FK to users(id) or a parent posting in 019/020 cascades; there is no
+         RESTRICT-without-cascade precedent anywhere except FKs to a role that may legitimately have
+         no row (fk_job_university/fk_svclisting_university, no deleteCascade attribute).
+
+         agreed_price is nullable, deviating from the reference sketch's NOT NULL, to support the
+         NEGOTIABLE pricing flow: for FIXED/HOURLY listings ServiceOrderService.createOrder always
+         copies listing.price into agreed_price immediately, so it's populated the instant the order
+         exists for the common case. For NEGOTIABLE listings (listing.price is null) it can stay
+         null until the client/provider agree a figure over the /inquire conversation — the state
+         machine blocks PENDING -> ACCEPTED while it's still null (see ServiceOrderService).
+
+         conversation_id links to the existing messaging module (conversations table, migration
+         010) — this is the concrete "reach out via messaging" mechanism: order creation
+         auto-creates/reuses a DIRECT conversation with the provider via the existing
+         ConversationService, no new chat infrastructure. No deleted_at — audit/transaction history
+         like job_applications, never soft-deleted; terminal states (COMPLETED/CANCELLED/DISPUTED)
+         preserve the row.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="022-03" author="system">
+        <createTable tableName="service_orders">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="listing_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_svcorder_listing"
+                             references="service_listings(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="client_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_svcorder_client"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="requirements" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <!-- Nullable — see header note. -->
+            <column name="agreed_price" type="DECIMAL(10,2)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="scheduled_at" type="DATETIME(6)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="status"
+                    type="ENUM('PENDING','ACCEPTED','IN_PROGRESS','COMPLETED','CANCELLED','DISPUTED')"
+                    defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Optional note on decline/cancel/dispute — mirrors job_applications.decision_reason. -->
+            <column name="decision_reason" type="VARCHAR(255)">
+                <constraints nullable="true"/>
+            </column>
+            <!-- FK added in changeset 022-04 with onDelete="SET NULL" — the column-level
+                 constraints shorthand only supports a boolean deleteCascade, not SET NULL. -->
+            <column name="conversation_id" type="BIGINT UNSIGNED">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <!-- Provider reviewing orders on one listing. -->
+        <createIndex tableName="service_orders" indexName="idx_svcorder_listing">
+            <column name="listing_id"/>
+            <column name="status"/>
+        </createIndex>
+        <!-- "My orders" as a client. -->
+        <createIndex tableName="service_orders" indexName="idx_svcorder_client">
+            <column name="client_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+
+        <rollback>
+            <dropTable tableName="service_orders"/>
+        </rollback>
+    </changeSet>
+
+    <!-- conversation_id's FK is added in its own changeset with onDelete SET NULL — Liquibase's
+         createTable/constraints element has no onDelete="SET NULL" option, only deleteCascade.
+         Mirrors 020-05's identical treatment of project_members.project_role_id. -->
+    <changeSet id="022-04" author="system">
+        <addForeignKeyConstraint baseTableName="service_orders" baseColumnNames="conversation_id"
+                                 constraintName="fk_svcorder_conversation"
+                                 referencedTableName="conversations" referencedColumnNames="id"
+                                 onDelete="SET NULL"/>
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="service_orders" constraintName="fk_svcorder_conversation"/>
+        </rollback>
+    </changeSet>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         service_reviews
+
+         One review per (order, reviewer) — both the client and the provider may each leave exactly
+         one review of the other once the order is COMPLETED. Only client-authored reviews (of the
+         provider) roll into service_listings.rating_avg/rating_count — see
+         ServiceReviewService.recomputeListingRating. rating is validated 1-5 via @Min/@Max on the
+         request DTO, not a DB CHECK (no CHECK-constraint precedent anywhere in this schema). No
+         updated_at — reviews are immutable, no edit endpoint.
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <changeSet id="022-05" author="system">
+        <createTable tableName="service_reviews">
+            <column name="id" type="BIGINT UNSIGNED" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="order_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_svcreview_order"
+                             references="service_orders(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="reviewer_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_svcreview_reviewer"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="reviewee_id" type="BIGINT UNSIGNED">
+                <constraints nullable="false"
+                             foreignKeyName="fk_svcreview_reviewee"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <!-- INT, not TINYINT: this codebase has no non-boolean TINYINT precedent anywhere in
+                 the schema (every TINYINT is TINYINT(1) for a Java boolean) — matches
+                 students.year_of_study, the established convention for a small Integer field,
+                 and avoids a Hibernate schema-validation TINYINT/INTEGER type mismatch against the
+                 entity's plain `int rating`. Range (1-5) is enforced via @Min/@Max on the request
+                 DTO, not the column type. -->
+            <column name="rating" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="comment" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="service_reviews"
+                             columnNames="order_id, reviewer_id"
+                             constraintName="uq_svcreview_order_reviewer"/>
+
+        <!-- "Has this order already been reviewed by X." -->
+        <createIndex tableName="service_reviews" indexName="idx_svcreview_order">
+            <column name="order_id"/>
+        </createIndex>
+        <!-- "Reviews about me." -->
+        <createIndex tableName="service_reviews" indexName="idx_svcreview_reviewee">
+            <column name="reviewee_id"/>
+            <column name="created_at" descending="true"/>
+        </createIndex>
+
+        <rollback>
+            <dropTable tableName="service_reviews"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

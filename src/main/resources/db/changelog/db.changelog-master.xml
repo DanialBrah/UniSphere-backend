@@ -26,5 +26,6 @@
     <include file="changes/019-create-jobs-tables.xml"                    relativeToChangelogFile="true"/>
     <include file="changes/020-create-projects-tables.xml"                relativeToChangelogFile="true"/>
     <include file="changes/021-extend-notifications-for-projects.xml"     relativeToChangelogFile="true"/>
+    <include file="changes/022-create-services-tables.xml"                relativeToChangelogFile="true"/>
 
 </databaseChangeLog>
